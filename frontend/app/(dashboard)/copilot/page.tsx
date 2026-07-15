@@ -11,45 +11,115 @@ import {
   Sparkles,
   BookOpen,
   X,
-  ChevronUp,
+  Mic,
+  Bot,
+  User,
+  BarChart2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { BottomSheet } from "@/components/ui/bottom-sheet";
+import { Tabs } from "@/components/ui/tabs";
+import { EmptyState } from "@/components/ui/empty-state";
 import { useStreamingChat } from "@/hooks/use-streaming-chat";
 import { Citation } from "@/lib/api";
 import { env } from "@/lib/env";
 
-/* ─── Markdown-aware message renderer ─── */
-function FormattedMessage({ content }: { content: string }) {
+function parseLineWithCitations(line: string, citations: Citation[]): React.ReactNode[] {
+  const parts = line.split("**");
+  return parts.map((part, pIdx) => {
+    const isBold = pIdx % 2 === 1;
+    const citationRegex = /\[((?:DOC-[a-zA-Z0-9_-]+)(?:\s*,\s*DOC-[a-zA-Z0-9_-]+)*)\]/gi;
+    const segments: React.ReactNode[] = [];
+    let lastIndex = 0;
+    let match;
+
+    while ((match = citationRegex.exec(part)) !== null) {
+      const matchIndex = match.index;
+      const matchContent = match[1];
+
+      if (matchIndex > lastIndex) {
+        segments.push(part.substring(lastIndex, matchIndex));
+      }
+
+      const docIds = matchContent.split(",").map(id => id.trim());
+      docIds.forEach((docId, subIdx) => {
+        if (subIdx > 0) {
+          segments.push(", ");
+        }
+
+        const citation = citations.find(c => c.document_id.toLowerCase() === docId.toLowerCase());
+        if (citation) {
+          segments.push(
+            <span
+              key={docId + "-" + matchIndex + "-" + subIdx}
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-primary/10 border border-primary/20 text-primary font-mono text-[10px] font-semibold hover:bg-primary/20 cursor-pointer transition-colors"
+              title={citation.snippet}
+            >
+              {citation.document_name}
+            </span>
+          );
+        } else {
+          segments.push(
+            <span
+              key={docId + "-" + matchIndex + "-" + subIdx}
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-muted border border-border text-muted-foreground font-mono text-[10px]"
+            >
+              {docId}
+            </span>
+          );
+        }
+      });
+
+      lastIndex = citationRegex.lastIndex;
+    }
+
+    if (lastIndex < part.length) {
+      segments.push(part.substring(lastIndex));
+    }
+
+    if (isBold) {
+      return (
+        <strong key={pIdx} className="font-semibold text-foreground">
+          {segments}
+        </strong>
+      );
+    }
+    return <React.Fragment key={pIdx}>{segments}</React.Fragment>;
+  });
+}
+
+/* ─── Markdown-aware renderer ─── */
+function FormattedMessage({
+  content,
+  streaming,
+  citations = [],
+}: {
+  content: string;
+  streaming?: boolean;
+  citations?: Citation[];
+}) {
   const lines = content.split("\n");
   return (
-    <div className="space-y-2 font-sans text-xs leading-relaxed text-slate-200">
+    <div className="space-y-1.5 text-sm leading-relaxed text-foreground/90">
       {lines.map((line, idx) => {
         let trimmed = line.trim();
         const isBullet = trimmed.startsWith("* ") || trimmed.startsWith("- ");
         if (isBullet) trimmed = trimmed.substring(2);
 
-        const parts = trimmed.split("**");
-        const renderedText = parts.map((part, pIdx) => {
-          if (pIdx % 2 === 1)
-            return (
-              <strong key={pIdx} className="font-bold text-slate-100">
-                {part}
-              </strong>
-            );
-          return part;
-        });
+        const rendered = parseLineWithCitations(trimmed, citations);
 
         if (isBullet) {
           return (
-            <div key={idx} className="flex items-start gap-2 pl-2 my-1">
-              <span className="text-primary mt-1 text-[10px] shrink-0">•</span>
-              <span>{renderedText}</span>
+            <div key={idx} className="flex items-start gap-2.5 pl-1">
+              <span className="text-primary mt-1.5 shrink-0 text-xs">▸</span>
+              <span className="leading-relaxed">{rendered}</span>
             </div>
           );
         }
         return (
-          <p key={idx} className="min-h-[1em]">
-            {renderedText}
+          <p key={idx} className={`min-h-[1.2em] ${idx === lines.length - 1 && streaming ? "streaming-cursor" : ""}`}>
+            {rendered}
           </p>
         );
       })}
@@ -57,8 +127,27 @@ function FormattedMessage({ content }: { content: string }) {
   );
 }
 
-/* ─── Citation / Grounding Panel content (reused in sidebar + bottom sheet) ─── */
-function CitationPanelContent({
+/* ─── Confidence indicator ─── */
+function ConfidenceBadge({ confidence }: { confidence: string | null }) {
+  if (!confidence) return null;
+  const map = {
+    high:   { variant: "success" as const, icon: ShieldCheck, label: "High Confidence" },
+    medium: { variant: "info"    as const, icon: Sparkles,    label: "Medium Confidence" },
+    low:    { variant: "warning" as const, icon: AlertTriangle, label: "Low Confidence" },
+  };
+  const entry = map[confidence as keyof typeof map];
+  if (!entry) return null;
+  const Icon = entry.icon;
+  return (
+    <Badge variant={entry.variant} dot className="gap-1.5">
+      <Icon className="h-3 w-3" />
+      {entry.label}
+    </Badge>
+  );
+}
+
+/* ─── Citation panel ─── */
+function CitationPanel({
   confidence,
   citations,
   onCitationClick,
@@ -68,133 +157,105 @@ function CitationPanelContent({
   onCitationClick: (c: Citation) => void;
 }) {
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 p-5">
+      {/* Header */}
       <div>
-        <h2 className="font-display font-semibold text-xs text-slate-300 uppercase tracking-wider">
-          Verification &amp; Grounding
-        </h2>
-        <p className="text-[10px] text-muted-foreground mt-1 leading-normal">
-          Inspect database citations and confidence scoring metrics for the current turn.
+        <h2 className="font-display font-semibold text-sm text-foreground">Sources & Grounding</h2>
+        <p className="text-xs text-muted-foreground mt-1 leading-snug">
+          Citation traceability and confidence scoring for the current response.
         </p>
       </div>
 
-      {/* Confidence Score */}
+      {/* Confidence */}
       {confidence && (
-        <div className="space-y-2 border-t border-border pt-4">
-          <h4 className="text-[10px] font-display font-semibold uppercase text-slate-400 tracking-wider">
-            Confidence Scoring
-          </h4>
-          <div className="flex items-center gap-2 p-3 border border-border/80 bg-muted/10 rounded">
-            {confidence === "high" && (
-              <>
-                <ShieldCheck className="h-4 w-4 text-teal-success shrink-0" />
-                <div>
-                  <span className="text-[10px] font-mono font-bold text-teal-success uppercase block">
-                    HIGH CONFIDENCE
-                  </span>
-                  <span className="text-[9px] text-muted-foreground leading-none">
-                    Grounding context fully matches search constraints.
-                  </span>
-                </div>
-              </>
-            )}
-            {confidence === "medium" && (
-              <>
-                <Sparkles className="h-4 w-4 text-primary shrink-0" />
-                <div>
-                  <span className="text-[10px] font-mono font-bold text-primary uppercase block">
-                    MEDIUM CONFIDENCE
-                  </span>
-                  <span className="text-[9px] text-muted-foreground leading-none">
-                    Fuzzy matches merged with partial graph elements.
-                  </span>
-                </div>
-              </>
-            )}
-            {confidence === "low" && (
-              <>
-                <AlertTriangle className="h-4 w-4 text-amber-warning shrink-0" />
-                <div>
-                  <span className="text-[10px] font-mono font-bold text-amber-warning uppercase block">
-                    LOW CONFIDENCE
-                  </span>
-                  <span className="text-[9px] text-muted-foreground leading-none">
-                    Context missing or query categorized out-of-scope.
-                  </span>
-                </div>
-              </>
-            )}
+        <div className="space-y-2">
+          <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Confidence</span>
+          <div className="p-3 rounded-lg border border-border bg-muted/20 flex items-center gap-2.5">
+            <ConfidenceBadge confidence={confidence} />
           </div>
         </div>
       )}
 
       {/* Citations */}
-      <div className="space-y-3 border-t border-border pt-4">
-        <h4 className="text-[10px] font-display font-semibold uppercase text-slate-400 tracking-wider">
-          Citations Strip
-        </h4>
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Citations</span>
+          {citations.length > 0 && (
+            <Badge variant="info">{citations.length}</Badge>
+          )}
+        </div>
         {citations.length === 0 ? (
-          <div className="text-[10px] text-muted-foreground italic font-mono p-2 border border-border/40 border-dashed rounded text-center">
-            [NO CITATIONS DETECTED IN RESPONSE]
+          <div className="py-6 text-center text-[11px] font-mono text-muted-foreground border border-dashed border-border rounded-lg">
+            No citations detected
           </div>
         ) : (
           <div className="space-y-2">
             {citations.map((cite, idx) => (
-              <div
+              <button
                 key={idx}
                 onClick={() => onCitationClick(cite)}
-                className="p-3 border border-border bg-muted/15 rounded cursor-pointer transition-all duration-150 space-y-1.5 tap-target min-h-[44px] active:bg-muted/40 hover:border-slate-500"
+                className="w-full text-left p-3 rounded-lg border border-border bg-muted/10
+                           hover:bg-accent hover:border-border/80 transition-all duration-150
+                           tap-target min-h-[44px] space-y-1.5"
               >
-                <div className="flex items-center gap-1.5 text-[9px] font-mono text-slate-200">
+                <div className="flex items-center gap-1.5 text-[10px] font-mono text-foreground/80">
                   <BookOpen className="h-3.5 w-3.5 text-primary shrink-0" />
-                  <span className="truncate">{cite.document_name}</span>
+                  <span className="truncate font-semibold">{cite.document_name}</span>
                 </div>
-                <p className="text-[9px] text-muted-foreground truncate leading-relaxed">
+                <p className="text-[10px] text-muted-foreground leading-relaxed line-clamp-2">
                   &ldquo;{cite.snippet}&rdquo;
                 </p>
-              </div>
+              </button>
             ))}
           </div>
         )}
       </div>
 
-      <div className="text-[9px] font-mono text-muted-foreground border-t border-border pt-4">
-        Citations represent primary source nodes matching target properties.
-      </div>
+      <p className="text-[9px] font-mono text-muted-foreground/60 border-t border-border pt-4">
+        Citations represent primary source nodes matching target query constraints.
+      </p>
     </div>
   );
 }
 
-/* ─── Main Copilot Page ─── */
+const SUGGESTED_PROMPTS = [
+  "Discharge pressure target for Pump P-101?",
+  "Failure records on heat exchanger HX-302?",
+  "Safety shutdown sequence for Column C-201?",
+  "Instrumentation specs for valve 062-V1058?",
+];
+
 export default function CopilotPage() {
   const { messages, loading, status, citations, confidence, sendMessage, clearChat, executionTime } =
     useStreamingChat();
 
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  // Active citation details modal state
   const [activeCitation, setActiveCitation] = useState<Citation | null>(null);
-
-  // Mobile: sources bottom sheet visibility
   const [showSources, setShowSources] = useState(false);
 
-  // Comparison mode states
+  // Comparison mode
   const [compareMode, setCompareMode] = useState(false);
   const [activeCompareTab, setActiveCompareTab] = useState<"keyword" | "copilot">("copilot");
-  const [keywordResults, setKeywordResults] = useState<any[]>([]);
+  const [keywordResults, setKeywordResults] = useState<Array<{ text: string; score: number }>>([]);
   const [keywordLoading, setKeywordLoading] = useState(false);
   const [keywordTime, setKeywordTime] = useState<number | null>(null);
 
-  // Auto-scroll chat to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, status]);
 
-  // Close sources sheet when a new message arrives on mobile
+  // Auto-close sources sheet only when a NEW message arrives (query submitted),
+  // NOT when the sheet is toggled open (which would immediately close it).
+  const prevMsgCount = React.useRef(messages.length);
   useEffect(() => {
-    if (showSources && messages.length > 0) setShowSources(false);
-  }, [messages.length, showSources]);
+    if (messages.length > prevMsgCount.current) {
+      setShowSources(false);
+    }
+    prevMsgCount.current = messages.length;
+  }, [messages.length]);
 
   const handleQuerySubmit = (query: string) => {
     if (!query.trim() || loading) return;
@@ -204,26 +265,23 @@ export default function CopilotPage() {
       setKeywordLoading(true);
       setKeywordResults([]);
       setKeywordTime(null);
-      
+
       const fetchKeyword = async () => {
         try {
           const url = `${env.NEXT_PUBLIC_API_URL}/api/v1/search/keyword`;
           const response = await fetch(url, {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ query }),
           });
           if (response.ok) {
             const data = await response.json();
             setKeywordResults(data.results || []);
-            setKeywordTime(data.execution_time_sec !== undefined && data.execution_time_sec !== null ? data.execution_time_sec : 0.0);
+            setKeywordTime(data.execution_time_sec ?? 0.0);
           } else {
             setKeywordTime(0.0);
           }
-        } catch (err) {
-          console.error("Keyword search failed", err);
+        } catch {
           setKeywordTime(0.0);
         } finally {
           setKeywordLoading(false);
@@ -240,17 +298,30 @@ export default function CopilotPage() {
     setInput("");
   };
 
+  const hasMessages = messages.length > 0;
+  const lastAssistantIdx = [...messages].reverse().findIndex((m) => m.role === "assistant");
+  const lastAssistantActualIdx = lastAssistantIdx !== -1 ? messages.length - 1 - lastAssistantIdx : -1;
+
   return (
     <div className="flex-1 flex overflow-hidden h-full relative no-zoom">
-      {/* ── Main chat column ── */}
-      <div className="flex-1 flex flex-col h-full bg-background border-r border-border min-w-0">
-        {/* Header toolbar */}
-        <div className="shrink-0 p-3 md:p-4 border-b border-border bg-muted/20 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0">
-            <Terminal className="h-4 w-4 text-primary shrink-0" />
-            <h1 className="font-display font-bold text-xs uppercase tracking-wider text-slate-200 truncate">
-              {compareMode ? "Search Method Benchmarking" : "Copilot Hybrid QA"}
-            </h1>
+
+      {/* ── Main Chat Column ── */}
+      <div className="flex-1 flex flex-col h-full min-w-0 bg-background">
+
+        {/* ── Header ── */}
+        <div className="shrink-0 px-4 md:px-6 py-3.5 border-b border-border bg-card/40 backdrop-blur-sm flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="p-1.5 rounded-lg bg-primary/10 border border-primary/20 shrink-0">
+              <Terminal className="h-3.5 w-3.5 text-primary" />
+            </div>
+            <div className="min-w-0">
+              <h1 className="font-display font-bold text-sm text-foreground truncate">
+                {compareMode ? "Search Benchmarking" : "AI Copilot"}
+              </h1>
+              <p className="text-[10px] font-mono text-muted-foreground hidden md:block">
+                {compareMode ? "Keyword vs. Hybrid RAG comparison" : "Hybrid vector-graph QA terminal"}
+              </p>
+            </div>
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
@@ -261,151 +332,143 @@ export default function CopilotPage() {
                 setKeywordResults([]);
                 setKeywordTime(null);
               }}
-              className={`text-[10px] uppercase font-display border px-2.5 py-1 rounded transition-colors min-h-[32px] tap-target ${
-                compareMode
-                  ? "border-primary bg-primary/10 text-primary"
-                  : "border-border bg-muted/10 text-muted-foreground hover:text-slate-200"
-              }`}
+              className={`inline-flex items-center gap-1.5 text-[10px] font-display font-semibold uppercase tracking-wider
+                          border rounded-lg px-3 py-1.5 transition-all duration-150 min-h-[32px] tap-target
+                          ${compareMode
+                            ? "border-primary/40 bg-primary/10 text-primary"
+                            : "border-border bg-transparent text-muted-foreground hover:text-foreground hover:bg-accent"
+                          }`}
             >
-              {compareMode ? "Standard View" : "Compare with Keyword Search"}
+              <BarChart2 className="h-3 w-3" />
+              <span className="hidden sm:inline">{compareMode ? "Standard" : "Compare"}</span>
             </button>
 
-            {messages.length > 0 && (
-              <button
+            {hasMessages && (
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => {
                   clearChat();
                   setKeywordResults([]);
                   setKeywordTime(null);
                 }}
-                className="text-[10px] uppercase font-display border border-border px-2 py-1 rounded bg-muted/10 text-muted-foreground hover:text-slate-200 transition-colors min-h-[32px] tap-target"
               >
                 Clear
-              </button>
+              </Button>
             )}
 
-            <div className="hidden md:flex text-[10px] font-mono text-muted-foreground uppercase border border-border/80 px-2 py-1 rounded">
-              STATE: STANDBY
-            </div>
+            {!compareMode && (
+              <div className="hidden md:flex items-center gap-1.5 text-[10px] font-mono text-muted-foreground border border-border px-2.5 py-1.5 rounded-lg">
+                <span className="status-dot status-dot-online" />
+                <span>Active</span>
+              </div>
+            )}
           </div>
         </div>
 
         {/* ── Conversation Area ── */}
-        <div className="flex-1 min-h-0 overflow-y-auto scroll-touch p-4 md:p-6 space-y-4">
-          {messages.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-center p-6 md:p-8 max-w-sm mx-auto space-y-4">
-              <div className="p-3 bg-muted/20 rounded-full border border-border">
-                <Terminal className="h-6 w-6 text-slate-400" />
-              </div>
-              <h3 className="font-display font-medium text-slate-200 text-xs uppercase tracking-wider">
-                Industrial Terminal QA
-              </h3>
-              <p className="text-[10px] text-muted-foreground leading-relaxed">
-                Query pump tolerances, maintenance specifications, or safety manual rules.
-              </p>
+        <div className="flex-1 min-h-0 overflow-y-auto scroll-touch px-4 md:px-6 py-5 space-y-4">
+
+          {/* Empty State */}
+          {!hasMessages && !compareMode && (
+            <div className="h-full flex flex-col items-center justify-center max-w-md mx-auto py-12 space-y-6">
+              <EmptyState
+                icon={Bot}
+                title="Plant Copilot Ready"
+                description="Query pump tolerances, maintenance specifications, P&ID tags, or safety manual rules using hybrid RAG + graph retrieval."
+              />
               <div className="w-full space-y-2">
-                <button
-                  onClick={() => handleQuerySubmit("What is the discharge pressure target for Pump P-101?")}
-                  className="w-full text-left text-[10px] font-mono p-3 border border-border bg-muted/10 rounded hover:border-slate-500 text-slate-300 flex justify-between items-center group min-h-[48px] tap-target active:bg-muted/30"
-                >
-                  <span>Discharge targets for P-101?</span>
-                  <ArrowRight className="h-3 w-3 text-muted-foreground group-hover:text-primary transition-colors shrink-0" />
-                </button>
-                <button
-                  onClick={() => handleQuerySubmit("List failure records on heat exchanger HX-302")}
-                  className="w-full text-left text-[10px] font-mono p-3 border border-border bg-muted/10 rounded hover:border-slate-500 text-slate-300 flex justify-between items-center group min-h-[48px] tap-target active:bg-muted/30"
-                >
-                  <span>Failure log on HX-302?</span>
-                  <ArrowRight className="h-3 w-3 text-muted-foreground group-hover:text-primary transition-colors shrink-0" />
-                </button>
+                <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider text-center mb-3">
+                  Suggested queries
+                </p>
+                {SUGGESTED_PROMPTS.map((prompt, i) => (
+                  <button
+                    key={i}
+                    onClick={() => handleQuerySubmit(prompt)}
+                    className="w-full text-left text-xs font-mono p-3.5 rounded-lg border border-border bg-muted/10
+                               hover:border-primary/30 hover:bg-primary/5 text-foreground/80
+                               flex justify-between items-center group min-h-[48px] tap-target transition-all duration-150"
+                  >
+                    <span>{prompt}</span>
+                    <ArrowRight className="h-3.5 w-3.5 text-muted-foreground group-hover:text-primary transition-colors shrink-0 ml-2" />
+                  </button>
+                ))}
               </div>
             </div>
-          ) : compareMode ? (
+          )}
+
+          {/* Compare Mode */}
+          {compareMode && (
             <div className="space-y-4">
-              {/* Benchmarking Delta Callout */}
+              {/* Delta Analysis Banner */}
               {(executionTime !== null || keywordTime !== null) && (
-                <div className="p-3 md:p-4 border border-border bg-muted/5 rounded space-y-2">
-                  <h4 className="text-[10px] font-display font-semibold uppercase text-slate-300 tracking-wider flex items-center gap-1.5">
+                <div className="p-4 rounded-lg border border-border bg-card space-y-2 animate-fade-in">
+                  <div className="flex items-center gap-2">
                     <Sparkles className="h-3.5 w-3.5 text-primary" />
-                    Benchmarking Delta Analysis
-                  </h4>
-                  <p className="text-[10px] text-muted-foreground leading-normal font-sans">
+                    <span className="text-[11px] font-display font-bold uppercase tracking-wider text-foreground">
+                      Benchmarking Delta Analysis
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
                     {keywordTime !== null && executionTime !== null ? (
                       <>
-                        Traditional keyword search returned <span className="font-mono text-slate-200 font-bold">{keywordResults.length} raw records</span> in{" "}
-                        <span className="font-mono text-amber-warning font-bold">{keywordTime.toFixed(3)}s</span>. 
-                        Copilot synthesized a contextual, verified answer in{" "}
-                        <span className="font-mono text-teal-success font-bold">{executionTime.toFixed(2)}s</span> (saving human manual scanning of ~
-                        <span className="font-mono text-slate-200 font-bold">
+                        Keyword search: <span className="font-mono text-foreground font-semibold">{keywordResults.length} raw records</span> in{" "}
+                        <span className="font-mono text-amber-warning font-bold">{keywordTime.toFixed(3)}s</span>.{" "}
+                        Copilot synthesized a verified answer in{" "}
+                        <span className="font-mono text-teal-success font-bold">{executionTime.toFixed(2)}s</span>,
+                        saving manual scanning of ~<span className="font-mono text-foreground font-semibold">
                           {keywordResults.reduce((acc, r) => acc + r.text.split(" ").length, 0).toLocaleString()} words
-                        </span>).
+                        </span>.
                       </>
-                    ) : (
-                      "Waiting for queries to finish execution..."
-                    )}
+                    ) : "Submit a query to compare methods..."}
                   </p>
                 </div>
               )}
 
-              {/* Mobile active tab selector buttons for screens < lg */}
-              <div className="flex lg:hidden border border-border rounded bg-muted/10 p-1 gap-1">
-                <button
-                  type="button"
-                  onClick={() => setActiveCompareTab("keyword")}
-                  className={`flex-1 text-[9px] uppercase tracking-wider font-display py-2 rounded text-center transition-colors min-h-[36px] tap-target ${
-                    activeCompareTab === "keyword"
-                      ? "bg-primary text-slate-900 font-bold"
-                      : "text-muted-foreground hover:text-slate-200"
-                  }`}
-                >
-                  Method A: Keyword ({keywordResults.length})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveCompareTab("copilot")}
-                  className={`flex-1 text-[9px] uppercase tracking-wider font-display py-2 rounded text-center transition-colors min-h-[36px] tap-target ${
-                    activeCompareTab === "copilot"
-                      ? "bg-primary text-slate-900 font-bold"
-                      : "text-muted-foreground hover:text-slate-200"
-                  }`}
-                >
-                  Method B: Copilot
-                </button>
+              {/* Mobile Tab Switcher */}
+              <div className="lg:hidden">
+                <Tabs
+                  items={[
+                    { id: "keyword", label: "Method A: Keyword", count: keywordResults.length },
+                    { id: "copilot", label: "Method B: Copilot" },
+                  ]}
+                  activeId={activeCompareTab}
+                  onChange={(id) => setActiveCompareTab(id as "keyword" | "copilot")}
+                />
               </div>
 
-              {/* Grid split panels */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 min-h-[450px]">
-                {/* Left Panel: Traditional Keyword Search */}
-                <div className={`flex flex-col border border-border bg-card/45 rounded overflow-hidden ${
+              {/* Split panels */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 min-h-[400px]">
+                {/* Keyword Panel */}
+                <div className={`flex flex-col rounded-lg border border-border bg-card overflow-hidden ${
                   activeCompareTab === "keyword" ? "flex" : "hidden lg:flex"
                 }`}>
-                  <div className="p-3 border-b border-border bg-muted/15 flex justify-between items-center">
-                    <span className="text-[10px] font-mono font-bold text-muted-foreground uppercase tracking-wider">
-                      Method A: Traditional Keyword Search
+                  <div className="px-4 py-3 border-b border-border bg-muted/20 flex items-center justify-between">
+                    <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-muted-foreground">
+                      Method A — Keyword Search
                     </span>
                     {keywordTime !== null && (
-                      <span className="text-[10px] font-mono bg-muted px-2 py-0.5 rounded text-amber-warning border border-border font-bold">
-                        LATENCY: {keywordTime.toFixed(3)}s
-                      </span>
+                      <Badge variant="warning">{keywordTime.toFixed(3)}s</Badge>
                     )}
                   </div>
-                  <div className="flex-1 overflow-y-auto scroll-touch p-4 space-y-3 font-mono text-[11px]">
+                  <div className="flex-1 overflow-y-auto scroll-touch p-4 space-y-3 font-mono text-xs">
                     {keywordLoading ? (
-                      <div className="h-full flex items-center justify-center gap-2 text-muted-foreground animate-pulse py-8">
+                      <div className="h-full flex items-center justify-center gap-2 text-muted-foreground animate-pulse">
                         <Loader2 className="h-4 w-4 animate-spin text-primary" />
                         <span>Querying full-text indexes...</span>
                       </div>
                     ) : keywordResults.length === 0 ? (
-                      <div className="h-full flex items-center justify-center text-muted-foreground italic text-center p-8 border border-dashed border-border/40 rounded py-12">
-                        [NO DIRECT INDEX MATCHES RETURNED]
+                      <div className="h-full flex items-center justify-center text-muted-foreground text-center py-12 border border-dashed border-border rounded-lg">
+                        No index matches — submit a query
                       </div>
                     ) : (
                       keywordResults.map((res, rIdx) => (
-                        <div key={rIdx} className="p-3 border border-border bg-muted/10 rounded space-y-2">
-                          <div className="flex justify-between items-center text-[9px] text-muted-foreground border-b border-border/45 pb-1">
-                            <span>MATCH #{rIdx + 1}</span>
-                            <span className="text-amber-warning font-bold">SCORE: {res.score.toFixed(3)}</span>
+                        <div key={rIdx} className="p-3 rounded-lg border border-border bg-muted/10 space-y-2">
+                          <div className="flex justify-between items-center text-[9px] text-muted-foreground">
+                            <span>Match #{rIdx + 1}</span>
+                            <Badge variant="warning">Score: {res.score.toFixed(3)}</Badge>
                           </div>
-                          <p className="text-slate-200 leading-relaxed max-h-[120px] overflow-y-auto scroll-touch scrollbar-thin">
+                          <p className="text-foreground/80 leading-relaxed text-[11px] max-h-[100px] overflow-y-auto scroll-touch">
                             {res.text}
                           </p>
                         </div>
@@ -414,139 +477,199 @@ export default function CopilotPage() {
                   </div>
                 </div>
 
-                {/* Right Panel: Copilot RAG Answer */}
-                <div className={`flex flex-col border border-border bg-card rounded overflow-hidden ${
+                {/* Copilot Panel */}
+                <div className={`flex flex-col rounded-lg border border-border bg-card overflow-hidden ${
                   activeCompareTab === "copilot" ? "flex" : "hidden lg:flex"
                 }`}>
-                  <div className="p-3 border-b border-border bg-muted/20 flex justify-between items-center">
-                    <span className="text-[10px] font-mono font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1">
-                      <Sparkles className="h-3 w-3 text-primary shrink-0" />
-                      Method B: Copilot Hybrid RAG
-                    </span>
+                  <div className="px-4 py-3 border-b border-border bg-muted/20 flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 text-[10px] font-mono font-bold uppercase tracking-wider text-foreground">
+                      <Sparkles className="h-3 w-3 text-primary" />
+                      Method B — Copilot Hybrid RAG
+                    </div>
                     {executionTime !== null && (
-                      <span className="text-[10px] font-mono bg-muted px-2 py-0.5 rounded text-teal-success border border-border font-bold">
-                        LATENCY: {executionTime.toFixed(2)}s
-                      </span>
+                      <Badge variant="success">{executionTime.toFixed(2)}s</Badge>
                     )}
                   </div>
-                  <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                  <div className="flex-1 overflow-y-auto p-4 space-y-3">
                     {messages.map((msg, idx) => {
                       const isUser = msg.role === "user";
                       return (
                         <div key={idx} className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
-                          <div className={`max-w-[90%] rounded p-3 text-xs leading-relaxed border ${
-                            isUser ? "bg-muted/30 border-border text-slate-100 font-mono" : "bg-card border-border/80 text-slate-200"
+                          <div className={`max-w-[90%] rounded-xl p-3 text-xs border ${
+                            isUser
+                              ? "bg-primary/10 border-primary/20 text-foreground"
+                              : "bg-muted/20 border-border text-foreground"
                           }`}>
-                            <div className="flex items-center gap-1.5 border-b border-border/40 pb-1 mb-2 text-[8px] font-mono text-muted-foreground uppercase tracking-wider">
-                              <span>{isUser ? "OPERATOR QUERY" : "SYSTEM SYNTHESIZED RESPONSE"}</span>
-                            </div>
-                            {isUser ? <p className="whitespace-pre-wrap">{msg.content}</p> : <FormattedMessage content={msg.content} />}
+                            <FormattedMessage content={msg.content} citations={msg.citations || citations} />
                           </div>
                         </div>
                       );
                     })}
                     {status && (
-                      <div className="flex items-center gap-2 text-[10px] font-mono text-muted-foreground animate-pulse py-2">
+                      <div className="flex items-center gap-2 text-[10px] font-mono text-muted-foreground">
                         <Loader2 className="h-3 w-3 animate-spin text-primary" />
-                        <span>{status}</span>
+                        {status}
                       </div>
                     )}
                   </div>
                 </div>
               </div>
             </div>
-          ) : (
-            <div className="space-y-4 md:space-y-6">
+          )}
+
+          {/* Standard Messages */}
+          {!compareMode && hasMessages && (
+            <div className="space-y-4 md:space-y-5 max-w-3xl">
               {messages.map((msg, index) => {
                 const isUser = msg.role === "user";
-                // Only show Sources link on the last assistant message when citations exist
-                const isLastAssistant =
-                  !isUser &&
-                  index === messages.length - 1 &&
-                  citations.length > 0;
+                const isLast = index === messages.length - 1;
+                const isStreaming = isLast && !isUser && loading;
+                const isLastAssistant = index === lastAssistantActualIdx && citations.length > 0;
+
                 return (
                   <div
                     key={index}
-                    className={`flex ${isUser ? "justify-end" : "justify-start"}`}
+                    className={`flex gap-3 ${isUser ? "justify-end" : "justify-start"} animate-fade-in-up`}
+                    style={{ animationDelay: "0ms" }}
                   >
-                    <div
-                      className={`max-w-[88%] md:max-w-[80%] rounded p-3 md:p-4 text-xs leading-relaxed border ${
-                        isUser
-                          ? "bg-muted/30 border-border text-slate-100 font-mono"
-                          : "bg-card border-border/80 text-slate-200"
-                      }`}
-                    >
-                      <div className="flex items-center gap-1.5 border-b border-border/40 pb-1.5 mb-2 text-[9px] font-mono text-muted-foreground uppercase tracking-wider">
-                        <span>{isUser ? "OPERATOR QUERY" : "SYSTEM RESPONSE"}</span>
+                    {/* Avatar — AI only */}
+                    {!isUser && (
+                      <div className="shrink-0 mt-0.5">
+                        <div className="h-7 w-7 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center">
+                          <Bot className="h-3.5 w-3.5 text-primary" />
+                        </div>
                       </div>
-                      {isUser ? (
-                        <p className="whitespace-pre-wrap">{msg.content}</p>
-                      ) : (
-                        <FormattedMessage content={msg.content} />
-                      )}
+                    )}
 
-                      {/* Inline Sources link — only on the last LLM reply, only when citations exist */}
+                    <div className={`flex flex-col gap-1.5 ${isUser ? "items-end" : "items-start"} max-w-[85%] md:max-w-[78%]`}>
+                      {/* Role label */}
+                      <div className={`flex items-center gap-1.5 text-[9px] font-mono uppercase tracking-wider text-muted-foreground ${isUser ? "flex-row-reverse" : ""}`}>
+                        {isUser ? <User className="h-2.5 w-2.5" /> : null}
+                        <span>{isUser ? "You" : "Marg AI"}</span>
+                      </div>
+
+                      {/* Bubble */}
+                      <div
+                        className={`rounded-2xl px-4 py-3 border ${
+                          isUser
+                            ? "rounded-tr-sm bg-primary/12 border-primary/20 text-foreground"
+                            : "rounded-tl-sm bg-card border-border text-foreground border-l-2 border-l-primary/30"
+                        }`}
+                      >
+                        {isUser ? (
+                          <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+                        ) : (
+                          <FormattedMessage content={msg.content} streaming={isStreaming} citations={msg.citations || citations} />
+                        )}
+                      </div>
+
+                      {/* Sources link — last AI message only */}
                       {isLastAssistant && (
                         <button
                           onClick={() => setShowSources(true)}
-                          className="mt-3 pt-2.5 border-t border-border/40 w-full flex items-center gap-1.5 text-[9px] font-mono text-primary hover:text-primary/80 transition-colors tap-target"
+                          className="flex items-center gap-1.5 text-[10px] font-mono text-primary hover:text-primary/80 transition-colors tap-target py-1"
                         >
                           <BookOpen className="h-3 w-3 shrink-0" />
-                          <span className="tracking-wider uppercase">
-                            Sources ({citations.length})
-                          </span>
+                          <span>Sources ({citations.length})</span>
                         </button>
                       )}
                     </div>
+
+                    {/* Avatar — User only */}
+                    {isUser && (
+                      <div className="shrink-0 mt-0.5">
+                        <div className="h-7 w-7 rounded-full bg-muted/60 border border-border flex items-center justify-center">
+                          <User className="h-3.5 w-3.5 text-muted-foreground" />
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })}
 
+              {/* Typing indicator */}
+              {loading && !status && (
+                <div className="flex gap-3 justify-start animate-fade-in">
+                  <div className="h-7 w-7 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0 mt-0.5">
+                    <Bot className="h-3.5 w-3.5 text-primary" />
+                  </div>
+                  <div className="bg-card border border-border rounded-2xl rounded-tl-sm px-4 py-3.5 flex items-center gap-1.5">
+                    <div className="typing-dot" />
+                    <div className="typing-dot" />
+                    <div className="typing-dot" />
+                  </div>
+                </div>
+              )}
+
+              {/* Status text */}
               {status && (
-                <div className="flex items-center gap-2 text-[10px] font-mono text-muted-foreground animate-pulse py-2">
+                <div className="flex items-center gap-2 text-[11px] font-mono text-muted-foreground animate-pulse pl-10">
                   <Loader2 className="h-3 w-3 animate-spin text-primary" />
                   <span>{status}</span>
                 </div>
               )}
+
               <div ref={messagesEndRef} />
             </div>
           )}
         </div>
 
-        {/* ── Input bar — pinned above bottom tab bar ──
-            On mobile: sits at the bottom of the chat column, above the tab bar.
-            The parent layout's mobile-content-padding handles the tab bar clearance.
-            When keyboard opens, flex-col layout shrinks the chat area upward. */}
-        <div className="shrink-0 p-3 md:p-4 border-t border-border bg-card">
-          <form onSubmit={handleSubmit} className="flex gap-2">
-            <input
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Enter tag or engineering query..."
-              disabled={loading}
-              autoComplete="off"
-              autoCorrect="off"
-              spellCheck={false}
-              className="flex-1 bg-background border border-border rounded px-3 md:px-4 py-2.5 text-xs focus:outline-none focus:border-primary text-slate-200 font-mono min-h-[44px]"
-            />
+        {/* ── Input Composer ── */}
+        <div className="shrink-0 border-t border-border bg-card/60 backdrop-blur-sm p-3 md:p-4">
+          <form onSubmit={handleSubmit} className="flex gap-2.5 max-w-3xl">
+            <div className="flex-1 relative">
+              <input
+                ref={inputRef}
+                type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder="Query equipment tags, specs, or procedures..."
+                disabled={loading}
+                autoComplete="off"
+                autoCorrect="off"
+                spellCheck={false}
+                className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm
+                           focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20
+                           text-foreground placeholder:text-muted-foreground/60 font-sans
+                           disabled:opacity-50 min-h-[48px] transition-all duration-150"
+              />
+            </div>
+            {/* Mic placeholder */}
+            <button
+              type="button"
+              className="shrink-0 h-12 w-12 rounded-xl border border-border bg-transparent text-muted-foreground
+                         hover:bg-accent hover:text-foreground transition-all duration-150 flex items-center justify-center"
+              title="Voice input (coming soon)"
+              disabled
+            >
+              <Mic className="h-4 w-4" />
+            </button>
             <Button
               type="submit"
-              size="sm"
               disabled={loading || !input.trim()}
-              className="font-display text-[10px] tracking-wider uppercase flex items-center gap-1.5 px-3 md:px-4 min-h-[44px] min-w-[44px] tap-target"
+              size="lg"
+              className="shrink-0 min-h-[48px] px-5"
             >
-              <span className="hidden sm:inline">Transmit</span>
-              <Send className="h-3 w-3" />
+              {loading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Send className="h-4 w-4" />
+              )}
+              <span className="hidden sm:inline ml-1">Send</span>
             </Button>
           </form>
+          {executionTime !== null && !compareMode && (
+            <p className="text-[10px] font-mono text-muted-foreground mt-2 pl-1">
+              Last response: {executionTime.toFixed(2)}s — hybrid graph + vector retrieval
+            </p>
+          )}
         </div>
       </div>
 
-      {/* ── Citation sidebar — desktop only (lg+) ── */}
+      {/* ── Sources Sidebar — desktop ── */}
       {!compareMode && (
-        <div className="hidden lg:flex w-80 bg-card p-6 flex-col justify-between shrink-0 h-full overflow-y-auto scroll-touch">
-          <CitationPanelContent
+        <div className="hidden lg:flex w-80 border-l border-border bg-card flex-col shrink-0 h-full overflow-y-auto scroll-touch">
+          <CitationPanel
             confidence={confidence}
             citations={citations}
             onCitationClick={setActiveCitation}
@@ -554,87 +677,58 @@ export default function CopilotPage() {
         </div>
       )}
 
-      {/* ── Citation bottom sheet — mobile only, conditionally rendered ── */}
-      {showSources && (
-        <>
-          {/* Backdrop */}
-          <div
-            onClick={() => setShowSources(false)}
-            className="lg:hidden absolute inset-0 bg-slate-950/60 z-40 sheet-backdrop"
-          />
-          {/* Sheet — above the bottom tab bar */}
-          <div
-            className="lg:hidden absolute left-0 right-0 z-50 bg-card border-t border-border rounded-t-2xl bottom-sheet flex flex-col"
-            style={{
-              bottom: "calc(4rem + env(safe-area-inset-bottom, 0px))",
-              maxHeight: "65vh",
-            }}
-          >
-            {/* Drag handle */}
-            <div className="shrink-0 flex justify-center pt-3 pb-1">
-              <div className="h-1 w-10 rounded-full bg-border" />
-            </div>
-            {/* Sheet header */}
-            <div className="shrink-0 flex items-center justify-between px-5 py-3 border-b border-border">
-              <span className="font-display font-bold text-xs uppercase tracking-wider text-slate-200">
-                Sources &amp; Grounding
-              </span>
-              <button
-                onClick={() => setShowSources(false)}
-                className="text-muted-foreground hover:text-slate-100 transition-colors tap-target min-h-[44px] min-w-[44px] flex items-center justify-center"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            {/* Sheet content — flex-1 min-h-0 is the scrollable region */}
-            <div className="flex-1 min-h-0 overflow-y-auto scroll-touch p-5">
-              <CitationPanelContent
-                confidence={confidence}
-                citations={citations}
-                onCitationClick={(cite) => {
-                  setActiveCitation(cite);
-                  setShowSources(false);
-                }}
-              />
-            </div>
-          </div>
-        </>
-      )}
+      {/* ── Sources Bottom Sheet — mobile ── */}
+      <BottomSheet
+        open={showSources && !compareMode}
+        onClose={() => setShowSources(false)}
+        title="Sources & Grounding"
+        maxHeight="70vh"
+        bottomOffset="calc(4.5rem + env(safe-area-inset-bottom, 0px))"
+        className="lg:hidden"
+      >
+        <CitationPanel
+          confidence={confidence}
+          citations={citations}
+          onCitationClick={(cite) => {
+            setActiveCitation(cite);
+            setShowSources(false);
+          }}
+        />
+      </BottomSheet>
 
-      {/* ── Citation detail modal ── */}
+      {/* ── Citation Detail Modal ── */}
       {activeCitation && (
-        <div className="absolute inset-0 bg-slate-950/70 z-50 flex items-end md:items-center justify-center p-0 md:p-4">
-          <div className="w-full md:max-w-md bg-card border border-border md:rounded p-5 md:p-6 shadow-2xl space-y-4 rounded-t-2xl">
-            <div className="flex items-center justify-between border-b border-border pb-3">
+        <div className="absolute inset-0 bg-slate-950/75 z-50 flex items-end md:items-center justify-center p-0 md:p-6">
+          <div className="w-full md:max-w-lg bg-card border border-border rounded-2xl md:rounded-xl shadow-[var(--shadow-elevated)] space-y-4 p-5 md:p-6">
+            <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <BookOpen className="h-4 w-4 text-primary" />
-                <h3 className="font-display font-bold text-xs uppercase text-slate-200 tracking-wider">
+                <div className="p-1.5 rounded-lg bg-primary/10">
+                  <BookOpen className="h-4 w-4 text-primary" />
+                </div>
+                <h3 className="font-display font-bold text-sm text-foreground">
                   Source Reference
                 </h3>
               </div>
               <button
                 onClick={() => setActiveCitation(null)}
-                className="text-muted-foreground hover:text-slate-100 transition-colors tap-target min-h-[44px] min-w-[44px] flex items-center justify-center"
+                className="text-muted-foreground hover:text-foreground transition-colors tap-target h-9 w-9 flex items-center justify-center rounded-lg hover:bg-accent"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <div className="space-y-3 text-xs leading-relaxed">
-              <div className="font-mono text-[10px] text-muted-foreground">
-                Document ID: {activeCitation.document_id}
-                <span className="block mt-0.5">Asset: {activeCitation.document_name}</span>
+
+            <div className="space-y-3">
+              <div className="text-[10px] font-mono text-muted-foreground space-y-0.5">
+                <div>Document: {activeCitation.document_name}</div>
+                <div className="text-muted-foreground/60">ID: {activeCitation.document_id}</div>
               </div>
-              <div className="p-3 border border-border bg-muted/10 rounded font-mono text-[11px] text-slate-300">
+              <div className="p-3 rounded-lg border border-border bg-muted/20 font-mono text-xs text-foreground/80 leading-relaxed">
                 &ldquo;{activeCitation.snippet}&rdquo;
               </div>
             </div>
-            <div className="flex justify-end pt-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setActiveCitation(null)}
-                className="font-display text-[10px] uppercase tracking-wider min-h-[44px] tap-target"
-              >
+
+            <div className="flex justify-end pt-1">
+              <Button variant="outline" size="sm" onClick={() => setActiveCitation(null)}>
                 Dismiss
               </Button>
             </div>

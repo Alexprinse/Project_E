@@ -5,6 +5,7 @@ import { Citation } from "@/lib/api";
 export interface Message {
   role: "user" | "assistant";
   content: string;
+  citations?: Citation[];
 }
 
 export function useStreamingChat() {
@@ -97,7 +98,7 @@ export function useStreamingChat() {
                 const base = prev.slice(0, -1);
                 const last = prev[prev.length - 1];
                 if (last && last.role === "assistant") {
-                  return [...base, { role: "assistant", content: assistantText }];
+                   return [...base, { role: "assistant", content: assistantText }];
                 } else {
                   return [...prev, { role: "assistant", content: assistantText }];
                 }
@@ -108,6 +109,16 @@ export function useStreamingChat() {
               setConfidence(data.confidence || "medium");
               setExecutionTime(data.execution_time_sec !== undefined && data.execution_time_sec !== null ? data.execution_time_sec : null);
               setStatus("");
+              
+              // Update last assistant message with its actual citations
+              setMessages((prev) => {
+                const base = prev.slice(0, -1);
+                const last = prev[prev.length - 1];
+                if (last && last.role === "assistant") {
+                  return [...base, { ...last, citations: data.citations || [] }];
+                }
+                return prev;
+              });
             } else if (eventType === "error") {
               setStatus(`Error: ${data.error}`);
             }

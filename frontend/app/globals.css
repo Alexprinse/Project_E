@@ -4,136 +4,147 @@
 
 @layer base {
   :root {
-    /* Background: Deep graphite #14181C */
-    --background: 210 17% 9%;
-    --foreground: 210 7% 91%; /* Off-white #E6E8EA */
+    /* ── Backgrounds ── */
+    --background: 216 19% 7%;          /* #0D1117 — rich graphite */
+    --foreground: 210 8% 92%;          /* #E8EAED — near-white */
 
-    /* Card: slightly lifted slate #1C2128 */
-    --card: 214 17% 13%;
-    --card-foreground: 210 7% 91%;
+    /* ── Surfaces ── */
+    --card: 215 18% 10%;               /* #161B22 — elevated card */
+    --card-foreground: 210 8% 92%;
 
-    --popover: 214 17% 13%;
-    --popover-foreground: 210 7% 91%;
+    --popover: 215 18% 10%;
+    --popover-foreground: 210 8% 92%;
 
-    /* Primary Accent: Steel Blue #4A90A4 */
-    --primary: 193 38% 47%;
-    --primary-foreground: 210 17% 9%;
+    /* ── Brand Accents ── */
+    --primary: 193 38% 47%;            /* #4A90A4 — steel blue */
+    --primary-foreground: 216 19% 7%;
 
-    /* Secondary Accent / Borders: Industrial Gray #2C353F */
-    --secondary: 212 17% 21%;
-    --secondary-foreground: 210 7% 91%;
+    /* ── Surfaces / Secondary ── */
+    --secondary: 213 15% 14%;          /* #1C2128 — raised panel */
+    --secondary-foreground: 210 8% 92%;
 
-    /* Muted states */
-    --muted: 214 19% 11%;
-    --muted-foreground: 211 11% 58%; /* Slate gray #8A94A0 */
+    /* ── Muted ── */
+    --muted: 215 17% 9%;               /* #141920 */
+    --muted-foreground: 212 11% 54%;   /* #808A96 — slate gray */
 
-    --accent: 212 17% 21%;
-    --accent-foreground: 210 7% 91%;
+    /* ── Accent (hover surfaces) ── */
+    --accent: 213 15% 16%;
+    --accent-foreground: 210 8% 92%;
 
-    /* Destructive Alert/Safety: Amber #D98E33 */
-    --destructive: 33 70% 53%;
-    --destructive-foreground: 210 17% 9%;
+    /* ── Semantic ── */
+    --destructive: 0 72% 61%;          /* #F85149 — danger red */
+    --destructive-foreground: 216 19% 7%;
+    --danger: 0 72% 61%;
 
-    --border: 212 17% 21%;
-    --input: 212 17% 21%;
+    /* ── Border / Input ── */
+    --border: 213 13% 16%;             /* #21262D — subtle border */
+    --input: 213 13% 14%;
     --ring: 193 38% 47%;
 
-    /* Industrial Custom Accents */
-    --industrial-amber: 33 70% 53%; /* #D98E33 */
-    --industrial-teal: 160 36% 45%;  /* #4A9C82 */
+    /* ── Industrial Accents ── */
+    --industrial-amber: 33 70% 53%;    /* #D98E33 — warning amber */
+    --industrial-teal: 160 36% 45%;    /* #4A9C82 — success teal */
 
-    --radius: 0.25rem;
+    /* ── Radius ── */
+    --radius: 0.5rem;
 
+    /* ── Fonts ── */
     --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     --font-display: "Space Grotesk", sans-serif;
+    --font-mono: "IBM Plex Mono", "Fira Code", monospace;
+
+    /* ── Shadows ── */
+    --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.4), 0 1px 2px -1px rgba(0, 0, 0, 0.4);
+    --shadow-card: 0 4px 16px 0 rgba(0, 0, 0, 0.5), 0 1px 3px 0 rgba(0, 0, 0, 0.4);
+    --shadow-elevated: 0 8px 32px 0 rgba(0, 0, 0, 0.6), 0 2px 8px 0 rgba(0, 0, 0, 0.4);
+
+    /* ── Glow ── */
+    --glow-primary: 0 0 16px rgba(74, 144, 164, 0.25);
+    --glow-success: 0 0 12px rgba(74, 156, 130, 0.25);
+    --glow-warning: 0 0 12px rgba(217, 142, 51, 0.20);
+    --glow-danger: 0 0 12px rgba(248, 81, 73, 0.20);
   }
 }
 
+/* ─── Global Reset ─── */
 @layer base {
   * {
     @apply border-border;
   }
+
   body {
-    @apply bg-background text-foreground font-sans antialiased selection:bg-primary/20 selection:text-primary;
+    @apply bg-background text-foreground antialiased;
+    font-family: var(--font-sans);
     background-image:
-      radial-gradient(at 0% 0%, rgba(74, 144, 164, 0.05) 0px, transparent 50%),
-      radial-gradient(at 100% 0%, rgba(217, 142, 51, 0.02) 0px, transparent 50%);
+      radial-gradient(ellipse at 0% 0%, rgba(74, 144, 164, 0.04) 0px, transparent 55%),
+      radial-gradient(ellipse at 100% 100%, rgba(74, 156, 130, 0.02) 0px, transparent 50%);
     background-attachment: fixed;
-    /* Prevent double-tap-to-zoom on app shell; graph canvas overrides this */
     touch-action: pan-x pan-y;
+  }
+
+  ::selection {
+    background: rgba(74, 144, 164, 0.25);
+    color: hsl(var(--foreground));
   }
 }
 
 /* ─── Scrollbars ─── */
-
-/* Desktop: custom styled scrollbar */
 @media (hover: hover) {
-  ::-webkit-scrollbar { width: 6px; height: 6px; }
-  ::-webkit-scrollbar-track { @apply bg-muted; }
-  ::-webkit-scrollbar-thumb { @apply bg-border rounded transition-all; }
-  ::-webkit-scrollbar-thumb:hover { @apply bg-muted-foreground/30; }
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 10px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.4);
+  }
 }
-
-/* Touch devices: hide scrollbars for clean native feel */
 @media (hover: none) {
   ::-webkit-scrollbar { display: none; }
   * { scrollbar-width: none; }
 }
 
-/* ─── Industrial Panel Components ─── */
+/* ─── Keyframes ─── */
 
-.panel-card {
-  @apply bg-card border border-border text-foreground transition-all duration-200;
-  box-shadow: none;
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
 }
 
-.panel-card-header {
-  @apply border-b border-border p-4 bg-muted/40 font-display font-medium text-xs tracking-wider text-slate-300 uppercase;
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
-/* ─── Mobile Touch Utilities ─── */
-
-/* Momentum scrolling for scrollable panels */
-.scroll-touch {
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior: contain;
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 
-/* Graph canvas: allow pinch-to-zoom and pan */
-.graph-touch {
-  touch-action: pinch-zoom;
+@keyframes slide-up-sheet {
+  from { transform: translateY(100%); opacity: 0.6; }
+  to   { transform: translateY(0); opacity: 1; }
 }
 
-/* Disable double-tap-to-zoom on non-graph content */
-.no-zoom {
-  touch-action: pan-x pan-y;
+@keyframes slide-in-right {
+  from { transform: translateX(16px); opacity: 0; }
+  to   { transform: translateX(0); opacity: 1; }
 }
 
-/* ─── Tap Feedback (touch-only devices) ─── */
-/* This is the single most impactful "native app feel" detail */
-@media (hover: none) {
-  button:active,
-  a:active,
-  [role="button"]:active,
-  .tap-target:active {
-    opacity: 0.72;
-    transform: scale(0.965);
-    transition: opacity 120ms ease-out, transform 120ms ease-out;
-  }
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.5; transform: scale(0.8); }
 }
 
-/* ─── Bottom Sheet — conditional render, keyframe entrance ─── */
-/* The sheet is only mounted in the DOM when open, so no peeking.           */
-/* A CSS keyframe handles the slide-up entrance animation.                   */
-@keyframes slideUpSheet {
-  from {
-    transform: translateY(100%);
-    opacity: 0.6;
-  }
-  to {
-    transform: translateY(0);
-    opacity: 1;
-  }
+@keyframes bounce-dot {
+  0%, 80%, 100% { transform: translateY(0); }
+  40%           { transform: translateY(-5px); }
+}
+
+@keyframes blink-cursor {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0; }
 }
 
 @keyframes fadeInBackdrop {
@@ -141,38 +152,167 @@
   to   { opacity: 1; }
 }
 
-.bottom-sheet {
-  transform: translateY(0);
-  animation: slideUpSheet 180ms ease-out forwards;
+/* ─── Utility Classes ─── */
+
+/* Glassmorphism surface */
+.glass {
+  background: rgba(22, 27, 34, 0.80);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
+/* Elevated card */
+.elevated-card {
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  box-shadow: var(--shadow-card);
+  border-radius: var(--radius);
+}
+
+/* Glow ring on focus */
+.glow-ring {
+  box-shadow: var(--glow-primary);
+}
+
+/* Loading skeleton shimmer */
+.skeleton-shimmer {
+  background: linear-gradient(
+    90deg,
+    hsl(var(--muted)) 25%,
+    hsl(var(--border)) 50%,
+    hsl(var(--muted)) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.8s ease-in-out infinite;
+}
+
+/* Fade in animations */
+.animate-fade-in-up {
+  opacity: 0;
+  animation: fade-in-up 320ms ease-out forwards;
+}
+.animate-fade-in {
+  opacity: 0;
+  animation: fade-in 200ms ease-out forwards;
+}
+.animate-slide-in-right {
+  opacity: 0;
+  animation: slide-in-right 250ms ease-out forwards;
+}
+
+/* Stagger children */
+.stagger-children > *:nth-child(1) { animation-delay: 0ms; }
+.stagger-children > *:nth-child(2) { animation-delay: 70ms; }
+.stagger-children > *:nth-child(3) { animation-delay: 140ms; }
+.stagger-children > *:nth-child(4) { animation-delay: 210ms; }
+.stagger-children > *:nth-child(5) { animation-delay: 280ms; }
+
+/* Status dot */
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.status-dot-online {
+  background: hsl(var(--industrial-teal));
+  box-shadow: var(--glow-success);
+  animation: pulse-dot 2.5s ease-in-out infinite;
+}
+.status-dot-warning {
+  background: hsl(var(--industrial-amber));
+  box-shadow: var(--glow-warning);
+}
+.status-dot-error {
+  background: hsl(var(--danger));
+  box-shadow: var(--glow-danger);
+}
+
+/* Streaming cursor */
+.streaming-cursor::after {
+  content: "▋";
+  animation: blink-cursor 0.9s ease-in-out infinite;
+  font-size: 0.85em;
+  color: hsl(var(--primary));
+  margin-left: 1px;
+}
+
+/* Typing dots */
+.typing-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: hsl(var(--muted-foreground));
+  animation: bounce-dot 1.2s ease-in-out infinite;
+}
+.typing-dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+/* ─── Industrial Panel Components (legacy compat) ─── */
+.panel-card {
+  @apply bg-card border border-border text-foreground rounded-lg;
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow 200ms ease, border-color 200ms ease;
+}
+.panel-card:hover {
+  box-shadow: var(--shadow-card);
+}
+.panel-card-header {
+  @apply border-b border-border px-5 py-3 bg-muted/40 font-display font-semibold text-[11px] tracking-wider text-muted-foreground uppercase;
+}
+
+/* ─── Mobile Touch Utilities ─── */
+.scroll-touch {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+.graph-touch {
+  touch-action: pinch-zoom;
+}
+.no-zoom {
+  touch-action: pan-x pan-y;
+}
+
+/* ─── Tap Feedback ─── */
+@media (hover: none) {
+  button:active,
+  a:active,
+  [role="button"]:active,
+  .tap-target:active {
+    opacity: 0.72;
+    transform: scale(0.965);
+    transition: opacity 100ms ease-out, transform 100ms ease-out;
+  }
+}
+
+/* ─── Bottom Sheet ─── */
+.bottom-sheet {
+  animation: slide-up-sheet 240ms cubic-bezier(0.32, 0.72, 0, 1) forwards;
+}
 .sheet-backdrop {
   animation: fadeInBackdrop 180ms ease-out forwards;
 }
 
 /* ─── Safe Area Utilities ─── */
-
-/* Bottom tab bar respects phone notch / home indicator */
 .bottom-tab-bar {
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
-
-/* Main content bottom padding when tab bar is visible */
 .mobile-content-padding {
-  padding-bottom: calc(4rem + env(safe-area-inset-bottom, 0px));
+  padding-bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px));
 }
 
 /* ─── prefers-reduced-motion ─── */
 @media (prefers-reduced-motion: reduce) {
-  * {
-    animation-delay: 0s !important;
-    animation-duration: 0s !important;
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0s !important;
+    transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
-  .bottom-sheet,
-  .sheet-backdrop {
-    transition: none !important;
-  }
+  .skeleton-shimmer { animation: none; background: hsl(var(--muted)); }
+  .animate-fade-in-up,
+  .animate-fade-in,
+  .animate-slide-in-right { opacity: 1; }
 }

@@ -1,9 +1,24 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import { Upload, FileText, CheckCircle2, AlertCircle, Loader2, X, Network, Database, Trash2 } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
+import {
+  Upload,
+  FileText,
+  CheckCircle2,
+  AlertCircle,
+  Loader2,
+  X,
+  Network,
+  Trash2,
+  CloudUpload,
+  FolderOpen,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/card";
+import { BottomSheet } from "@/components/ui/bottom-sheet";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Skeleton } from "@/components/ui/skeleton";
 import { api, IngestionStatusResponse, GraphResponse } from "@/lib/api";
 
 interface IngestionJobCache {
@@ -16,90 +31,80 @@ interface IngestionJobCache {
   error?: string;
 }
 
+const ACCEPTED_TYPES = [".pdf", ".csv", ".xlsx", ".txt", ".png", ".jpg", ".jpeg"];
+
+function statusVariant(status: string): "success" | "warning" | "danger" | "info" {
+  switch (status) {
+    case "COMPLETED": return "success";
+    case "FAILED": return "danger";
+    case "PROCESSING": return "warning";
+    default: return "info";
+  }
+}
+
 export default function IngestionPage() {
   const [files, setFiles] = useState<IngestionJobCache[]>([]);
   const [dragActive, setDragActive] = useState(false);
   const [uploading, setUploading] = useState(false);
-  
-  // Drawer state
+
   const [selectedJob, setSelectedJob] = useState<IngestionJobCache | null>(null);
   const [drawerLoading, setDrawerLoading] = useState(false);
   const [graphData, setGraphData] = useState<GraphResponse | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Load cache from localStorage on mount
   useEffect(() => {
     try {
       const cached = localStorage.getItem("marg_uploads");
-      if (cached) {
-        setFiles(JSON.parse(cached));
-      }
-    } catch (e) {
-      console.error("Failed to load local storage uploads cache", e);
+      if (cached) setFiles(JSON.parse(cached));
+    } catch {
+      /* ignore */
     }
   }, []);
 
-  // Sync cache with localStorage on updates
   const updateFiles = (newFiles: IngestionJobCache[]) => {
     setFiles(newFiles);
     try {
       localStorage.setItem("marg_uploads", JSON.stringify(newFiles));
-    } catch (e) {
-      console.error("Failed to write local storage uploads cache", e);
+    } catch {
+      /* ignore */
     }
   };
 
-  // Poll status of active jobs
+  // Poll active jobs
   useEffect(() => {
-    const activeJobs = files.filter(f => f.status === "QUEUED" || f.status === "PROCESSING");
-    if (activeJobs.length === 0) return;
+    const active = files.filter((f) => f.status === "QUEUED" || f.status === "PROCESSING");
+    if (!active.length) return;
 
     const interval = setInterval(async () => {
       let updated = false;
-      const polledFiles = await Promise.all(
+      const polled = await Promise.all(
         files.map(async (file) => {
           if (file.status === "QUEUED" || file.status === "PROCESSING") {
             try {
               const res: IngestionStatusResponse = await api.getIngestionStatus(file.jobId);
               updated = true;
-              return {
-                ...file,
-                status: res.status,
-                progress: res.progress,
-                error: res.error,
-              };
-            } catch (e) {
-              console.error("Failed to poll status for job", file.jobId, e);
+              return { ...file, status: res.status, progress: res.progress, error: res.error };
+            } catch {
               return file;
             }
           }
           return file;
         })
       );
-
-      if (updated) {
-        updateFiles(polledFiles);
-      }
+      if (updated) updateFiles(polled);
     }, 1500);
 
     return () => clearInterval(interval);
   }, [files]);
 
-  // Load details drawer graph
   const handleOpenDrawer = async (job: IngestionJobCache) => {
     setSelectedJob(job);
-    if (job.status !== "COMPLETED") {
-      setGraphData(null);
-      return;
-    }
-    
+    if (job.status !== "COMPLETED") { setGraphData(null); return; }
     setDrawerLoading(true);
     try {
-      // Query graph explorer for the document node's connected subgraphs
       const data = await api.getGraphExplorer(job.jobId);
       setGraphData(data);
-    } catch (e) {
-      console.error("Failed to load extraction details subgraph", e);
+    } catch {
       setGraphData(null);
     } finally {
       setDrawerLoading(false);
@@ -107,94 +112,66 @@ export default function IngestionPage() {
   };
 
   const handleDrag = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.type === "dragenter" || e.type === "dragover") {
-      setDragActive(true);
-    } else if (e.type === "dragleave") {
-      setDragActive(false);
-    }
+    e.preventDefault(); e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") setDragActive(true);
+    else if (e.type === "dragleave") setDragActive(false);
   };
 
   const handleDrop = async (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
+    e.preventDefault(); e.stopPropagation();
     setDragActive(false);
-
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      await uploadFile(e.dataTransfer.files[0]);
-    }
+    if (e.dataTransfer.files?.[0]) await uploadFile(e.dataTransfer.files[0]);
   };
 
   const handleFileInput = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      await uploadFile(e.target.files[0]);
-    }
+    if (e.target.files?.[0]) await uploadFile(e.target.files[0]);
   };
 
   const uploadFile = async (file: File) => {
     setUploading(true);
     try {
       const res = await api.triggerIngestion(file);
-      
-      const sizeStr = `${(file.size / (1024 * 1024)).toFixed(2)} MB`;
-      const timeStr = new Date().toISOString().replace("T", " ").slice(0, 16);
-      
       const newJob: IngestionJobCache = {
         jobId: res.job_id,
         name: file.name,
-        size: sizeStr,
+        size: `${(file.size / (1024 * 1024)).toFixed(2)} MB`,
         progress: 0,
         status: "QUEUED",
-        timestamp: timeStr,
+        timestamp: new Date().toISOString().replace("T", " ").slice(0, 16),
       };
-
       updateFiles([newJob, ...files]);
     } catch (e) {
-      alert("Extraction trigger aborted: " + (e as Error).message);
+      alert("Upload failed: " + (e as Error).message);
     } finally {
       setUploading(false);
     }
   };
 
-  const handleDeleteDocument = async (e: React.MouseEvent, file: IngestionJobCache) => {
-    e.stopPropagation(); // Avoid activating the selection drawer
-    
-    const confirmDelete = window.confirm(
-      `Are you sure you want to delete "${file.name}"?\n\nThis will purge the document and any graph entities exclusively extracted from it.`
-    );
-    if (!confirmDelete) return;
-
+  const handleDelete = async (e: React.MouseEvent, file: IngestionJobCache) => {
+    e.stopPropagation();
+    if (!window.confirm(`Delete "${file.name}"?\n\nThis will purge the document and any exclusively extracted graph entities.`)) return;
     try {
       await api.deleteDocument(file.jobId);
-      const filtered = files.filter(f => f.jobId !== file.jobId);
+      const filtered = files.filter((f) => f.jobId !== file.jobId);
       updateFiles(filtered);
-      
-      // Close detail drawer if the deleted document was active
-      if (selectedJob?.jobId === file.jobId) {
-        setSelectedJob(null);
-      }
+      if (selectedJob?.jobId === file.jobId) setSelectedJob(null);
     } catch (err) {
-      alert("Failed to delete document: " + (err as Error).message);
+      alert("Delete failed: " + (err as Error).message);
     }
   };
 
-
-  // Filter out chunk and document nodes to list only physical entities extracted
   const extractedEntities = graphData?.nodes.filter(
-    n => n.id !== selectedJob?.jobId && !n.labels.includes("Chunk")
+    (n) => n.id !== selectedJob?.jobId && !n.labels.includes("Chunk")
   ) || [];
 
-  // Drawer content renderer
   const DrawerContent = () => {
     if (!selectedJob) return null;
     return (
-      <div className="space-y-6 flex-1 overflow-y-auto pr-1">
+      <div className="space-y-5 p-5">
+        {/* Meta */}
         <div>
-          <span className="text-[9px] font-mono text-primary uppercase border border-primary/20 px-2 py-0.5 rounded bg-primary/5">
-            Metadata Inspector
-          </span>
-          <h3 className="font-display font-bold text-xs text-slate-200 mt-3 truncate uppercase tracking-wider">
+          <Badge variant="info" className="mb-2">Metadata Inspector</Badge>
+          <h3 className="font-display font-bold text-sm text-foreground mt-2 break-words">
             {selectedJob.name}
           </h3>
           <p className="text-[10px] font-mono text-muted-foreground mt-1">
@@ -202,70 +179,72 @@ export default function IngestionPage() {
           </p>
         </div>
 
-        {/* Status Section */}
+        {/* Status */}
         <div className="space-y-2 border-t border-border pt-4">
-          <h4 className="text-[10px] font-display font-semibold uppercase text-slate-400 tracking-wider">
-            Pipeline Status
-          </h4>
-          <div className="text-[11px] font-mono flex justify-between">
-            <span className="text-muted-foreground">State:</span>
-            <span className={
-              selectedJob.status === "COMPLETED" 
-                ? "text-teal-success" 
-                : selectedJob.status === "FAILED" 
-                ? "text-destructive" 
-                : "text-amber-warning"
-            }>
+          <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Pipeline Status</span>
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-muted-foreground text-xs">State</span>
+            <Badge variant={statusVariant(selectedJob.status)} dot>
               {selectedJob.status}
-            </span>
+            </Badge>
           </div>
+          {(selectedJob.status === "QUEUED" || selectedJob.status === "PROCESSING") && (
+            <div className="space-y-1.5">
+              <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-amber-warning transition-all duration-500"
+                  style={{ width: `${selectedJob.progress}%` }}
+                />
+              </div>
+              <p className="text-[10px] font-mono text-muted-foreground text-right">{selectedJob.progress}%</p>
+            </div>
+          )}
           {selectedJob.error && (
-            <div className="text-[10px] text-destructive font-mono border border-destructive/20 bg-destructive/5 p-2 rounded">
-              Error: {selectedJob.error}
+            <div className="text-[10px] text-destructive font-mono border border-destructive/20 bg-destructive/5 p-2.5 rounded-lg">
+              {selectedJob.error}
             </div>
           )}
         </div>
 
-        {/* Extracted Entities Section */}
+        {/* Graph Entities */}
         <div className="space-y-3 border-t border-border pt-4">
-          <h4 className="text-[10px] font-display font-semibold uppercase text-slate-400 tracking-wider flex items-center gap-1.5">
+          <div className="flex items-center gap-2">
             <Network className="h-3.5 w-3.5 text-primary" />
-            <span>Resolved Graph Entities</span>
-          </h4>
+            <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Graph Entities</span>
+          </div>
 
           {drawerLoading ? (
-            <div className="flex items-center gap-2 py-4 text-xs font-mono text-muted-foreground">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              <span>TRAVERSING NEODB SCHEMATIC...</span>
+            <div className="space-y-2">
+              {[...Array(3)].map((_, i) => <Skeleton key={i} height={36} className="rounded-lg" />)}
             </div>
           ) : extractedEntities.length === 0 ? (
-            <div className="text-[10px] text-muted-foreground italic font-mono">
-              {selectedJob.status === "COMPLETED" 
-                ? "[NO CORE ENTITIES RESOLVED FOR THIS ASSET]"
-                : "[AWAITING EXTRACTION COMPLETION]"}
-            </div>
+            <p className="text-[10px] text-muted-foreground italic font-mono">
+              {selectedJob.status === "COMPLETED" ? "No core entities resolved" : "Awaiting extraction..."}
+            </p>
           ) : (
-            <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+            <div className="space-y-2 max-h-72 overflow-y-auto scroll-touch pr-1">
               {extractedEntities.map((entity, idx) => (
                 <div
                   key={idx}
-                  className="p-2 border border-border/80 bg-muted/10 rounded flex justify-between items-center text-[10px] font-mono"
+                  className="flex items-center justify-between p-2.5 rounded-lg border border-border bg-muted/10"
                 >
-                  <div className="truncate">
-                    <span className="text-slate-200 font-bold block truncate">
-                      {entity.id}
-                    </span>
-                    <span className="text-muted-foreground text-[9px] block">
-                      Type: {entity.properties.type || "Undefined"}
-                    </span>
+                  <div className="min-w-0 flex-1 mr-2">
+                    <p className="text-xs font-mono font-semibold text-foreground truncate">{entity.id}</p>
+                    <p className="text-[9px] text-muted-foreground">{entity.properties.type || "Undefined"}</p>
                   </div>
-                  <span className="text-[8px] uppercase px-1.5 py-0.5 border border-border bg-muted/40 text-muted-foreground rounded shrink-0">
+                  <Badge variant="outline" className="shrink-0 text-[8px]">
                     {entity.labels[0]}
-                  </span>
+                  </Badge>
                 </div>
               ))}
             </div>
           )}
+        </div>
+
+        {/* File info */}
+        <div className="border-t border-border pt-4 grid grid-cols-2 gap-3 text-[10px] font-mono text-muted-foreground">
+          <div><span className="block text-[9px] uppercase tracking-wider mb-0.5">Size</span>{selectedJob.size}</div>
+          <div><span className="block text-[9px] uppercase tracking-wider mb-0.5">Ingested</span>{selectedJob.timestamp}</div>
         </div>
       </div>
     );
@@ -273,234 +252,246 @@ export default function IngestionPage() {
 
   return (
     <div className="flex flex-1 overflow-hidden h-full no-zoom relative">
-      {/* Ingestion Panel */}
-      <div className="flex-1 overflow-y-auto scroll-touch p-4 md:p-8 space-y-5 md:space-y-8 max-w-5xl mx-auto w-full">
+      {/* ── Main Panel ── */}
+      <div className="flex-1 overflow-y-auto scroll-touch p-4 md:p-8 space-y-6 max-w-5xl mx-auto w-full">
+
         {/* Header */}
-        <div>
-          <h1 className="font-display font-bold text-base md:text-xl text-slate-100 uppercase tracking-wider">
+        <div className="animate-fade-in-up">
+          <h1 className="font-display font-bold text-xl md:text-2xl text-foreground tracking-tight">
             Ingestion Pipeline
           </h1>
-          <p className="text-[10px] md:text-xs text-muted-foreground mt-0.5">
+          <p className="text-sm text-muted-foreground mt-1">
             Feed manuals, datasheets, or scanned flowsheets into the knowledge graph.
           </p>
         </div>
 
-        {/* Drag and Drop block — also works as tap-to-upload on mobile */}
+        {/* ── Drop Zone ── */}
         <div
           onDragEnter={handleDrag}
           onDragOver={handleDrag}
           onDragLeave={handleDrag}
           onDrop={handleDrop}
           onClick={() => fileInputRef.current?.click()}
-          className={`border border-dashed rounded p-8 md:p-10 flex flex-col items-center justify-center transition-all duration-150 relative cursor-pointer tap-target ${
-            dragActive
-              ? "border-primary bg-primary/5"
-              : "border-border hover:border-slate-600 bg-muted/10 active:bg-muted/30"
-          }`}
+          className={`relative cursor-pointer rounded-xl border-2 border-dashed py-14 md:py-20
+                      flex flex-col items-center justify-center text-center transition-all duration-200 tap-target
+                      ${dragActive
+                        ? "border-primary bg-primary/5 scale-[1.01]"
+                        : "border-border hover:border-primary/40 hover:bg-muted/5 bg-muted/5"
+                      }`}
         >
           <input
             type="file"
-            id="file-upload"
             ref={fileInputRef}
             className="hidden"
             onChange={handleFileInput}
-            accept=".pdf,.csv,.xlsx,.txt,.png,.jpg,.jpeg"
+            accept={ACCEPTED_TYPES.join(",")}
           />
 
-          <div className="p-3 bg-muted/40 rounded border border-border/80 mb-3">
-            <Upload className={`h-5 w-5 ${dragActive ? "text-primary" : "text-slate-400"}`} />
+          {/* Upload icon */}
+          <div className={`mb-4 p-4 rounded-2xl border transition-all duration-200 ${
+            dragActive ? "bg-primary/15 border-primary/30" : "bg-muted/30 border-border"
+          }`}>
+            <CloudUpload className={`h-8 w-8 ${dragActive ? "text-primary" : "text-muted-foreground"} transition-colors`} />
           </div>
 
-          <h3 className="font-display font-medium text-slate-200 text-xs uppercase tracking-wider">
-            Drag & drop file here
+          <h3 className="font-display font-semibold text-base text-foreground mb-1">
+            {dragActive ? "Release to upload" : "Drop file here"}
           </h3>
-          <p className="text-[10px] text-muted-foreground mt-1 mb-4 font-mono">
-            PDF, CSV, SPEC SHEETS, OR PNG/JPG P&IDs
+          <p className="text-sm text-muted-foreground mb-5">
+            or click to browse your files
           </p>
+
+          {/* File type chips */}
+          <div className="flex flex-wrap gap-1.5 justify-center mb-5">
+            {ACCEPTED_TYPES.map((t) => (
+              <span key={t} className="text-[9px] font-mono px-2 py-0.5 rounded border border-border bg-muted/30 text-muted-foreground uppercase">
+                {t.replace(".", "")}
+              </span>
+            ))}
+          </div>
 
           <Button
             type="button"
             variant="outline"
             size="sm"
             onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
-            className="cursor-pointer font-display text-[10px] tracking-wider uppercase min-h-[44px] tap-target"
           >
+            <FolderOpen className="h-3.5 w-3.5" />
             Browse Files
           </Button>
 
+          {/* Uploading overlay */}
           {uploading && (
-            <div className="absolute inset-0 bg-slate-950/70 rounded flex items-center justify-center gap-2">
-              <Loader2 className="h-4 w-4 animate-spin text-primary" />
-              <span className="text-xs text-slate-300 font-mono">ENCRYPTING & TRANSMITTING ASSET...</span>
+            <div className="absolute inset-0 rounded-xl bg-background/80 backdrop-blur-sm flex items-center justify-center gap-3">
+              <Loader2 className="h-5 w-5 animate-spin text-primary" />
+              <span className="text-sm font-mono text-foreground">Transmitting asset...</span>
             </div>
           )}
         </div>
 
-        {/* Ingestion Table */}
-        <div className="space-y-4">
-          <div className="flex items-center justify-between border-b border-border pb-2">
-            <h3 className="font-display font-semibold text-xs tracking-wider uppercase text-slate-400">
-              Terminal Log History
-            </h3>
-            <span className="text-[9px] font-mono text-muted-foreground">TOTAL: {files.length} ITEMS</span>
-          </div>
+        {/* ── Job List ── */}
+        <Card>
+          <CardHeader>
+            <div className="p-1.5 rounded-md bg-primary/10">
+              <FileText className="h-3.5 w-3.5 text-primary" />
+            </div>
+            <CardTitle>Ingestion Log</CardTitle>
+            <span className="ml-auto text-[9px] font-mono text-muted-foreground">
+              {files.length} items
+            </span>
+          </CardHeader>
 
           {files.length === 0 ? (
-            <div className="border border-border rounded p-8 text-center text-xs text-muted-foreground font-mono">
-              [SYSTEM STANDBY - NO INGESTED DOCUMENTS RECORDED]
-            </div>
+            <CardBody>
+              <EmptyState
+                icon={Upload}
+                title="No documents yet"
+                description="Upload a PDF, datasheet, or scanned P&ID flowsheet to get started."
+              />
+            </CardBody>
           ) : (
-            <div className="border border-border rounded overflow-hidden overflow-x-auto">
-              <table className="w-full text-left border-collapse text-xs min-w-[360px]">
-                <thead>
-                  <tr className="bg-muted/40 border-b border-border font-display text-[10px] tracking-wider uppercase text-slate-300">
-                    <th className="p-3">File Name</th>
-                    <th className="p-3 hidden sm:table-cell">Job ID</th>
-                    <th className="p-3 hidden md:table-cell">Ingested Time</th>
-                    <th className="p-3">Status</th>
-                    <th className="p-3 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {files.map((file) => {
-                    const isSelected = selectedJob?.jobId === file.jobId;
-                    return (
-                      <tr
-                        key={file.jobId}
-                        onClick={() => handleOpenDrawer(file)}
-                        className={`cursor-pointer transition-colors tap-target hover:bg-muted/10 ${
-                          isSelected ? "bg-muted/30" : ""
-                        }`}
-                        style={{ minHeight: 44 }}
+            <>
+              {/* Desktop table */}
+              <div className="hidden md:block overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/20">
+                      <th className="px-5 py-3 font-display text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">File</th>
+                      <th className="px-5 py-3 font-display text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Job ID</th>
+                      <th className="px-5 py-3 font-display text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Ingested</th>
+                      <th className="px-5 py-3 font-display text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Status</th>
+                      <th className="px-5 py-3 font-display text-[10px] uppercase tracking-wider text-muted-foreground font-semibold text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {files.map((file) => {
+                      const isSelected = selectedJob?.jobId === file.jobId;
+                      return (
+                        <tr
+                          key={file.jobId}
+                          onClick={() => handleOpenDrawer(file)}
+                          className={`cursor-pointer transition-colors hover:bg-muted/10 ${isSelected ? "bg-primary/5" : ""}`}
+                        >
+                          <td className="px-5 py-3.5">
+                            <div className="flex items-center gap-2.5">
+                              <div className="p-1.5 rounded-md bg-primary/10 shrink-0">
+                                <FileText className="h-3 w-3 text-primary" />
+                              </div>
+                              <div>
+                                <span className="font-medium text-foreground truncate block max-w-[200px]">{file.name}</span>
+                                <span className="text-[10px] text-muted-foreground font-mono">{file.size}</span>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-5 py-3.5 font-mono text-[10px] text-muted-foreground">
+                            {file.jobId.slice(0, 10)}…
+                          </td>
+                          <td className="px-5 py-3.5 font-mono text-[10px] text-muted-foreground">
+                            {file.timestamp}
+                          </td>
+                          <td className="px-5 py-3.5">
+                            <div className="flex items-center gap-2">
+                              <Badge variant={statusVariant(file.status)} dot>
+                                {file.status === "PROCESSING" ? `${file.status} ${file.progress}%` : file.status}
+                              </Badge>
+                            </div>
+                          </td>
+                          <td className="px-5 py-3.5 text-right">
+                            <button
+                              onClick={(e) => handleDelete(e, file)}
+                              className="inline-flex items-center justify-center h-8 w-8 rounded-lg border border-transparent
+                                         text-muted-foreground hover:text-destructive hover:border-destructive/20 hover:bg-destructive/5
+                                         transition-all duration-150"
+                              title="Delete"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Mobile card list */}
+              <div className="md:hidden divide-y divide-border">
+                {files.map((file) => {
+                  const isSelected = selectedJob?.jobId === file.jobId;
+                  return (
+                    <div
+                      key={file.jobId}
+                      onClick={() => handleOpenDrawer(file)}
+                      className={`flex items-start gap-3 px-5 py-4 cursor-pointer transition-colors tap-target min-h-[64px]
+                                  ${isSelected ? "bg-primary/5" : "hover:bg-muted/10"}`}
+                    >
+                      <div className="p-2 rounded-lg bg-primary/10 shrink-0 mt-0.5">
+                        <FileText className="h-3.5 w-3.5 text-primary" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-foreground truncate">{file.name}</p>
+                        <div className="flex items-center gap-2 mt-1.5">
+                          <Badge variant={statusVariant(file.status)} dot>
+                            {file.status}
+                          </Badge>
+                          <span className="text-[10px] font-mono text-muted-foreground">{file.size}</span>
+                        </div>
+                      </div>
+                      <button
+                        onClick={(e) => handleDelete(e, file)}
+                        className="p-1.5 text-muted-foreground hover:text-destructive transition-colors tap-target"
                       >
-                        <td className="p-3 font-medium text-slate-200">
-                          <div className="flex items-center gap-2">
-                            <FileText className="h-3.5 w-3.5 text-primary/85 shrink-0" />
-                            <span className="truncate max-w-[140px] md:max-w-none">{file.name}</span>
-                          </div>
-                        </td>
-                        <td className="p-3 font-mono text-[10px] text-muted-foreground hidden sm:table-cell">
-                          {file.jobId.slice(0, 8)}...
-                        </td>
-                        <td className="p-3 font-mono text-[10px] text-muted-foreground hidden md:table-cell">
-                          {file.timestamp}
-                        </td>
-                        <td className="p-3">
-                          {file.status === "COMPLETED" && (
-                            <span className="inline-flex items-center gap-1 text-teal-success font-medium text-[10px]">
-                              <CheckCircle2 className="h-3 w-3" />
-                              <span className="hidden sm:inline">Complete</span>
-                            </span>
-                          )}
-                          {file.status === "FAILED" && (
-                            <span className="inline-flex items-center gap-1 text-destructive font-medium text-[10px]">
-                              <AlertCircle className="h-3 w-3" />
-                              <span className="hidden sm:inline">Failed</span>
-                            </span>
-                          )}
-                          {(file.status === "QUEUED" || file.status === "PROCESSING") && (
-                            <span className="inline-flex items-center gap-1.5 text-amber-warning font-medium text-[10px] animate-pulse">
-                              <Loader2 className="h-3 w-3 animate-spin" />
-                              <span className="hidden sm:inline">{file.status} ({file.progress}%)</span>
-                            </span>
-                          )}
-                        </td>
-                        <td className="p-3 text-right">
-                          <button
-                            onClick={(e) => handleDeleteDocument(e, file)}
-                            className="p-2 border border-transparent rounded hover:border-border hover:bg-muted/40 text-muted-foreground hover:text-destructive transition-all min-h-[40px] min-w-[40px] flex items-center justify-center tap-target ml-auto"
-                            title="Delete Asset"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
           )}
-        </div>
+        </Card>
       </div>
 
-      {/* Right side Detail Drawer — desktop right panel / mobile bottom sheet */}
-      <AnimatePresence>
-        {selectedJob && (
-          <>
-            {/* Desktop Drawer (lg+) */}
-            <motion.div
-              initial={{ opacity: 0, x: 300 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 300 }}
-              className="hidden lg:flex w-80 border-l border-border bg-card p-6 flex-col justify-between shrink-0 h-full relative"
-            >
-              <button
-                onClick={() => setSelectedJob(null)}
-                className="absolute top-4 right-4 text-muted-foreground hover:text-slate-100 transition-colors"
-              >
-                <X className="h-4 w-4" />
-              </button>
-              <DrawerContent />
-              <div className="border-t border-border pt-4 flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="w-full text-[10px] tracking-wider uppercase font-display"
-                  onClick={() => setSelectedJob(null)}
-                >
-                  Close Inspector
-                </Button>
-              </div>
-            </motion.div>
-
-            {/* Mobile Bottom Sheet Backdrop */}
-            <div
+      {/* ── Desktop Right Panel ── */}
+      {selectedJob && (
+        <div className="hidden lg:flex w-80 border-l border-border bg-card flex-col shrink-0 h-full relative animate-slide-in-right">
+          <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-muted/20">
+            <span className="font-display font-semibold text-xs uppercase tracking-wider text-muted-foreground">
+              Inspector
+            </span>
+            <button
               onClick={() => setSelectedJob(null)}
-              className="lg:hidden absolute inset-0 bg-slate-950/60 z-40 sheet-backdrop animate-fade-in"
-            />
-            {/* Mobile Bottom Sheet (below lg) */}
-            <div
-              className="lg:hidden absolute left-0 right-0 z-50 bg-card border-t border-border rounded-t-2xl bottom-sheet flex flex-col"
-              style={{
-                bottom: "calc(0px + env(safe-area-inset-bottom, 0px))",
-                maxHeight: "65vh",
-              }}
+              className="h-7 w-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
             >
-              {/* Drag handle */}
-              <div className="shrink-0 flex justify-center pt-3 pb-1">
-                <div className="h-1 w-10 rounded-full bg-border" />
-              </div>
-              {/* Sheet header */}
-              <div className="shrink-0 flex items-center justify-between px-5 py-3 border-b border-border">
-                <span className="font-display font-bold text-xs uppercase tracking-wider text-slate-200 truncate pr-4">
-                  {selectedJob.name}
-                </span>
-                <button
-                  onClick={() => setSelectedJob(null)}
-                  className="text-muted-foreground hover:text-slate-100 transition-colors tap-target min-h-[44px] min-w-[44px] flex items-center justify-center"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-              {/* Sheet content */}
-              <div className="flex-1 min-h-0 overflow-y-auto scroll-touch p-5">
-                <DrawerContent />
-                <div className="border-t border-border pt-4 mt-4 flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="w-full text-[10px] tracking-wider uppercase font-display min-h-[44px] tap-target"
-                    onClick={() => setSelectedJob(null)}
-                  >
-                    Close Inspector
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </>
-        )}
-      </AnimatePresence>
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto scroll-touch">
+            <DrawerContent />
+          </div>
+          <div className="border-t border-border p-4">
+            <Button variant="outline" size="sm" className="w-full" onClick={() => setSelectedJob(null)}>
+              Close Inspector
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Mobile Bottom Sheet ── */}
+      <BottomSheet
+        open={!!selectedJob}
+        onClose={() => setSelectedJob(null)}
+        title={selectedJob?.name}
+        maxHeight="72vh"
+        className="lg:hidden"
+      >
+        <DrawerContent />
+        <div className="border-t border-border p-4">
+          <Button variant="outline" size="sm" className="w-full min-h-[44px]" onClick={() => setSelectedJob(null)}>
+            Close Inspector
+          </Button>
+        </div>
+      </BottomSheet>
     </div>
   );
 }
