@@ -1,4 +1,4 @@
-# Sutradhar
+# Marg
 
 An AI-powered Industrial Knowledge Intelligence platform that transforms unstructured plant documents into a unified, queryable engineering knowledge graph.
 
@@ -11,13 +11,13 @@ An AI-powered Industrial Knowledge Intelligence platform that transforms unstruc
 
 ## 1. Problem Statement
 
-Industrial facilities store critical operations data across fragmented manuals, piping & instrumentation diagrams (P&IDs), datasheets, and maintenance logs in varied unstructured formats. Relying on traditional keyword search leads to high retrieval latency, lost structural context, and safety-critical errors during plant maintenance or incidents. Sutradhar addresses this by combining multimodal entity extraction and hybrid graph-vector retrieval to unify fragmented technical assets into a queryable, contextual intelligence network.
+Industrial facilities store critical operations data across fragmented manuals, piping & instrumentation diagrams (P&IDs), datasheets, and maintenance logs in varied unstructured formats. Relying on traditional keyword search leads to high retrieval latency, lost structural context, and safety-critical errors during plant maintenance or incidents. Marg addresses this by combining multimodal entity extraction and hybrid graph-vector retrieval to unify fragmented technical assets into a queryable, contextual intelligence network.
 
 ---
 
 ## 2. What It Does
 
-Sutradhar delivers a complete pipeline to ingest, extract, store, query, and visualize industrial data:
+Marg delivers a complete pipeline to ingest, extract, store, query, and visualize industrial data:
 
 * **Multimodal Ingestion Pipeline**: Ingests technical documentation (PDFs, CSVs, spreadsheets, markdown, text, and images) using `unstructured`, supporting asynchronous background execution for document parsing.
 * **Gemini-Powered Structured Extraction**: Extracts plant-floor entities (Equipment tags e.g. `P-101`, Locations, Documents, and Process Parameters) along with their directed relationships (e.g. `PART_OF`, `HAS_DOCUMENT`) using Gemini 2.5 Pro multimodal schemas.
@@ -31,7 +31,7 @@ Sutradhar delivers a complete pipeline to ingest, extract, store, query, and vis
 
 ## 3. Architecture Overview
 
-Sutradhar bridges the gap between unstructured document processing and graph-grounded agentic reasoning. Below is the end-to-end data pipeline:
+Marg bridges the gap between unstructured document processing and graph-grounded agentic reasoning. Below is the end-to-end data pipeline:
 
 ```mermaid
 flowchart TD
@@ -212,7 +212,7 @@ An overview of the codebase organization:
 
 ## 7. Evaluation Notes
 
-Sutradhar addresses key evaluation criteria through measurable design decisions:
+Marg addresses key evaluation criteria through measurable design decisions:
 
 * **Entity Extraction Accuracy**: Utilizes structured schema constraints combined with Gemini 2.5 Pro multimodal processing to extract engineering-specific entities (tags, locations, parameters) with high recall, validated against standard industry manuals.
 * **KG Linkage & Query Quality**: Combines vector lookup with multihop Cypher queries. By fetching adjacent nodes linked to matched entities (e.g., finding the safety manual governing a high-criticality pump), the RAG agent avoids "hallucinating" operating context.

@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Inter, Space_Grotesk, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
-import { Database, LayoutDashboard, MessageSquare, Network, Radio } from "lucide-react";
+import { Database, LayoutDashboard, MessageSquare, Network, Radio, ShieldAlert } from "lucide-react";
 import { BottomTabBar } from "@/components/features/BottomTabBar";
 
 // Official Next.js font loading configuration
@@ -23,13 +23,13 @@ const ibmPlexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Sutradhar — Industrial Knowledge Terminal",
+  title: "Marg — Industrial Knowledge Terminal",
   description: "AI-powered Industrial Knowledge Graph and Hybrid RAG QA platform for asset-intensive industries.",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "Sutradhar",
+    title: "Marg",
   },
   other: {
     "mobile-web-app-capable": "yes",
@@ -79,7 +79,7 @@ export default function RootLayout({
               <Link href="/" className="flex items-center gap-3">
                 <Radio className="h-5 w-5 text-primary animate-pulse" />
                 <span className="font-display font-bold text-base tracking-widest text-slate-100 uppercase">
-                  SUTRADHAR
+                  MARG
                 </span>
               </Link>
               <div className="text-[9px] font-mono text-muted-foreground uppercase tracking-widest mt-1">
@@ -119,6 +119,14 @@ export default function RootLayout({
               >
                 <Network className="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors" />
                 P&ID Graph Explorer
+              </Link>
+
+              <Link
+                href="/rca"
+                className="flex items-center gap-3 px-4 py-3 rounded text-xs font-semibold tracking-wider font-display text-slate-300 hover:bg-accent hover:text-slate-100 transition-all duration-150 group"
+              >
+                <ShieldAlert className="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors" />
+                RCA Assistant
               </Link>
             </nav>
           </div>

@@ -22,7 +22,7 @@ export default function DashboardHome() {
   useEffect(() => {
     // Read from uploader localStorage to show dynamic metrics
     try {
-      const cached = localStorage.getItem("sutradhar_uploads");
+      const cached = localStorage.getItem("marg_uploads");
       if (cached) {
         const jobs = JSON.parse(cached) as IngestionJobCache[];
         const completeCount = jobs.filter(j => j.status === "COMPLETED").length;
@@ -51,7 +51,7 @@ export default function DashboardHome() {
       <div className="flex items-center justify-between border-b border-border pb-4 gap-3">
         <div className="min-w-0">
           <h1 className="font-display font-bold text-base md:text-2xl text-slate-100 tracking-tight uppercase leading-tight truncate">
-            Sutradhar Control Room
+            Marg Control Room
           </h1>
           <p className="text-[10px] md:text-xs text-muted-foreground mt-0.5 hidden md:block">
             Plant-floor industrial knowledge intelligence terminal.

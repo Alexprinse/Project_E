@@ -1292,6 +1292,61 @@ wheels = [
 ]
 
 [[package]]
+name = "marg-backend"
+version = "0.1.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "anthropic" },
+    { name = "fastapi" },
+    { name = "google-genai" },
+    { name = "langchain" },
+    { name = "langgraph" },
+    { name = "neo4j" },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "python-multipart" },
+    { name = "sse-starlette" },
+    { name = "structlog" },
+    { name = "unstructured", extra = ["all-docs"] },
+    { name = "uvicorn", extra = ["standard"] },
+    { name = "voyageai" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "httpx" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "anthropic", specifier = ">=0.21.0" },
+    { name = "fastapi", specifier = ">=0.110.0" },
+    { name = "google-genai", specifier = ">=0.1.0" },
+    { name = "langchain", specifier = ">=0.1.12" },
+    { name = "langgraph", specifier = ">=0.0.30" },
+    { name = "neo4j", specifier = ">=5.18.0" },
+    { name = "pydantic", specifier = ">=2.6.0" },
+    { name = "pydantic-settings", specifier = ">=2.2.0" },
+    { name = "python-multipart", specifier = ">=0.0.9" },
+    { name = "sse-starlette", specifier = ">=2.0.0" },
+    { name = "structlog", specifier = ">=24.1.0" },
+    { name = "unstructured", extras = ["all-docs"], specifier = ">=0.12.5" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.28.0" },
+    { name = "voyageai", specifier = ">=0.2.1" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "httpx", specifier = ">=0.27.0" },
+    { name = "pytest", specifier = ">=8.1.1" },
+    { name = "pytest-asyncio", specifier = ">=0.23.5" },
+    { name = "ruff", specifier = ">=0.3.3" },
+]
+
+[[package]]
 name = "markdown"
 version = "3.10.2"
 source = { registry = "https://pypi.org/simple" }
@@ -2123,61 +2178,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/e6/88/bdb244e40284ded3632a9f88c23bc80230bd7b2ae4a8b7f2cc91adead7a8/preshed-3.0.13-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:2e77bed56aded7cbe5d28d6bd2178bc5b13eda0e0e464dab205fb578fa915000", size = 1919236, upload-time = "2026-03-23T08:56:42.616Z" },
     { url = "https://files.pythonhosted.org/packages/a0/c9/c91ea56342e6c364fc69b444a1ac5432327857199c44032c9cc9dc4c3a23/preshed-3.0.13-cp312-cp312-win_amd64.whl", hash = "sha256:04d8f13f2986e5d11af5ac51f55ce3106c70c41b483d20ea392e6180bdd0f870", size = 122938, upload-time = "2026-03-23T08:56:44.271Z" },
     { url = "https://files.pythonhosted.org/packages/b2/0b/6a99d99619fd83b14c696e2489caed7070647488d4d3ac0b723d35db2de0/preshed-3.0.13-cp312-cp312-win_arm64.whl", hash = "sha256:19318dc1cd8cac6663c6c830bf7e0002d2de853769fb03e056774e97c21bedfd", size = 109194, upload-time = "2026-03-23T08:56:45.346Z" },
-]
-
-[[package]]
-name = "project-e-backend"
-version = "0.1.0"
-source = { virtual = "." }
-dependencies = [
-    { name = "anthropic" },
-    { name = "fastapi" },
-    { name = "google-genai" },
-    { name = "langchain" },
-    { name = "langgraph" },
-    { name = "neo4j" },
-    { name = "pydantic" },
-    { name = "pydantic-settings" },
-    { name = "python-multipart" },
-    { name = "sse-starlette" },
-    { name = "structlog" },
-    { name = "unstructured", extra = ["all-docs"] },
-    { name = "uvicorn", extra = ["standard"] },
-    { name = "voyageai" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "httpx" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "ruff" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "anthropic", specifier = ">=0.21.0" },
-    { name = "fastapi", specifier = ">=0.110.0" },
-    { name = "google-genai", specifier = ">=0.1.0" },
-    { name = "langchain", specifier = ">=0.1.12" },
-    { name = "langgraph", specifier = ">=0.0.30" },
-    { name = "neo4j", specifier = ">=5.18.0" },
-    { name = "pydantic", specifier = ">=2.6.0" },
-    { name = "pydantic-settings", specifier = ">=2.2.0" },
-    { name = "python-multipart", specifier = ">=0.0.9" },
-    { name = "sse-starlette", specifier = ">=2.0.0" },
-    { name = "structlog", specifier = ">=24.1.0" },
-    { name = "unstructured", extras = ["all-docs"], specifier = ">=0.12.5" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.28.0" },
-    { name = "voyageai", specifier = ">=0.2.1" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "httpx", specifier = ">=0.27.0" },
-    { name = "pytest", specifier = ">=8.1.1" },
-    { name = "pytest-asyncio", specifier = ">=0.23.5" },
-    { name = "ruff", specifier = ">=0.3.3" },
 ]
 
 [[package]]

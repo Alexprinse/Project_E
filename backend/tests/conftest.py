@@ -1,3 +1,6 @@
+import os
+os.environ["GEMINI_API_KEY"] = "mock-key-for-skeleton"
+
 from typing import Generator
 from unittest.mock import MagicMock
 import pytest

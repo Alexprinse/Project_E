@@ -76,7 +76,7 @@ async def generate_answer_node(state: CopilotAgentState) -> Dict[str, Any]:
     
     if query_type == "out-of-scope":
         ans = (
-            "I'm sorry, but that query appears to be out of scope for the Sutradhar "
+            "I'm sorry, but that query appears to be out of scope for the Marg "
             "Industrial Knowledge Platform. I can assist you with equipment engineering specs, "
             "refinery units, process parameters, operating manuals, and failure logs."
         )
@@ -107,7 +107,7 @@ async def generate_answer_node(state: CopilotAgentState) -> Dict[str, Any]:
         history_str += f"{msg['role'].capitalize()}: {msg['content']}\n"
 
     system_instruction = (
-        "You are Sutradhar, a highly skilled AI platform for industrial safety, plant "
+        "You are Marg, a highly skilled AI platform for industrial safety, plant "
         "operations, and engineering maintenance. Answer the user's query accurately using "
         "only the provided document contexts and structural graph facts.\n\n"
         "Instructions:\n"

@@ -48,3 +48,39 @@ async def test_full_ingestion_pipeline_success(mock_neo4j_session: MagicMock, tm
         assert any("MERGE (n:Location" in call for call in calls)
         # Verify Relationship merge
         assert any("MERGE (a)-[r:PART_OF]->(b)" in call for call in calls)
+
+
+def test_entity_normalization_deduplication():
+    """Verifies that GraphRepository normalizes keys and deduplicates variants of the same component tag."""
+    from app.db.repositories.graph_repository import GraphRepository
+    
+    mock_session = MagicMock()
+    repo = GraphRepository(mock_session)
+    
+    # 1. Merge "4-Sidecut Line"
+    repo.merge_node("Equipment", "4-Sidecut Line", {"type": "Line"})
+    # Assert tag was normalized and display_name is preserved
+    calls = mock_session.run.call_args_list
+    assert len(calls) == 1
+    query = calls[0][0][0]
+    params = calls[0][1]
+    assert "MERGE (n:Equipment {tag: $entity_id})" in query
+    assert params["entity_id"] == "4sidecutline"
+    assert params["properties"]["display_name"] == "4-Sidecut Line"
+    
+    # 2. Merge relationship for "4-sidecut-line" -> "C-1100"
+    mock_session.reset_mock()
+    repo.merge_relationship(
+        source_label="Equipment",
+        source_id="4-sidecut-line",
+        target_label="Equipment",
+        target_id="C-1100",
+        rel_type="PART_OF",
+        properties={}
+    )
+    calls = mock_session.run.call_args_list
+    assert len(calls) == 1
+    params = calls[0][1]
+    assert params["source_id"] == "4sidecutline"
+    assert params["target_id"] == "c1100"
+

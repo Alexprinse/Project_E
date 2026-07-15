@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Database, MessageSquare, Network } from "lucide-react";
+import { LayoutDashboard, Database, MessageSquare, Network, ShieldAlert } from "lucide-react";
 
 const TABS = [
   {
@@ -27,6 +27,12 @@ const TABS = [
     href: "/graph-explorer",
     label: "Graph",
     icon: Network,
+    exact: false,
+  },
+  {
+    href: "/rca",
+    label: "RCA",
+    icon: ShieldAlert,
     exact: false,
   },
 ];

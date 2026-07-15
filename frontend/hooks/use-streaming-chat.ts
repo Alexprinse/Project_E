@@ -14,6 +14,7 @@ export function useStreamingChat() {
   const [citations, setCitations] = useState<Citation[]>([]);
   const [confidence, setConfidence] = useState<"high" | "medium" | "low" | null>(null);
   const [conversationId, setConversationId] = useState<string | null>(null);
+  const [executionTime, setExecutionTime] = useState<number | null>(null);
 
   const sendMessage = useCallback(async (query: string) => {
     if (!query.trim()) return;
@@ -22,6 +23,7 @@ export function useStreamingChat() {
     setStatus("Connecting to industrial copilot...");
     setCitations([]);
     setConfidence(null);
+    setExecutionTime(null);
 
     // 1. Add User message
     const userMessage: Message = { role: "user", content: query };
@@ -104,6 +106,7 @@ export function useStreamingChat() {
               setConversationId(data.conversation_id);
               setCitations(data.citations || []);
               setConfidence(data.confidence || "medium");
+              setExecutionTime(data.execution_time_sec !== undefined && data.execution_time_sec !== null ? data.execution_time_sec : null);
               setStatus("");
             } else if (eventType === "error") {
               setStatus(`Error: ${data.error}`);
@@ -127,6 +130,7 @@ export function useStreamingChat() {
     setConfidence(null);
     setStatus("");
     setConversationId(null);
+    setExecutionTime(null);
   }, []);
 
   return {
@@ -138,5 +142,6 @@ export function useStreamingChat() {
     conversationId,
     sendMessage,
     clearChat,
+    executionTime,
   };
 }

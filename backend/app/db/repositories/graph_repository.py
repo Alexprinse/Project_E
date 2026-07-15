@@ -1,8 +1,18 @@
+import re
 from typing import Any, Dict, List
 from app.db.repositories.base import BaseRepository
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
+
+def normalize_key(val: str) -> str:
+    """Normalizes keys by lowercasing, stripping whitespace, hyphens, and underscores."""
+    if not val:
+        return ""
+    s = val.lower().strip()
+    s = re.sub(r'[\-_]', '', s)
+    s = re.sub(r'\s+', '', s)
+    return s
 
 
 class GraphRepository(BaseRepository):
@@ -23,6 +33,15 @@ class GraphRepository(BaseRepository):
             key_prop = "name"
         elif label == "Regulation":
             key_prop = "code"
+
+        # Normalize the entity_id if it's one of the standard entities
+        original_id = entity_id
+        if label in ["Equipment", "Person", "Location", "ProcessParameter", "Regulation"]:
+            entity_id = normalize_key(entity_id)
+            # Ensure key matches the normalized entity_id
+            properties = dict(properties)
+            if "display_name" not in properties:
+                properties["display_name"] = original_id
 
         # Ensure the key property matches entity_id in properties dictionary
         clean_properties = dict(properties)
@@ -62,6 +81,11 @@ class GraphRepository(BaseRepository):
             elif label == "Regulation":
                 return "code"
             return "id"
+
+        if source_label in ["Equipment", "Person", "Location", "ProcessParameter", "Regulation"]:
+            source_id = normalize_key(source_id)
+        if target_label in ["Equipment", "Person", "Location", "ProcessParameter", "Regulation"]:
+            target_id = normalize_key(target_id)
 
         src_pk = get_pk(source_label)
         tgt_pk = get_pk(target_label)
@@ -121,12 +145,13 @@ class GraphRepository(BaseRepository):
     def get_subgraph(self, center_node_id: str, max_depth: int = 2) -> Dict[str, List[Any]]:
         """Retrieves nodes and edges surrounding a particular central node identifier."""
         # Generic match query looking across possible label key fields
+        norm_id = normalize_key(center_node_id)
         query = """
-        MATCH (n) WHERE n.id = $center_node_id OR n.tag = $center_node_id OR n.name = $center_node_id OR n.code = $center_node_id
+        MATCH (n) WHERE n.id = $center_node_id OR n.tag = $norm_id OR n.name = $norm_id OR n.code = $norm_id OR n.id = $norm_id
         MATCH path = (n)-[*1..2]-(m)
         RETURN nodes(path) as nodes, relationships(path) as rels
         """
-        result = self.session.run(query, center_node_id=center_node_id)
+        result = self.session.run(query, center_node_id=center_node_id, norm_id=norm_id)
         
         nodes_map = {}
         relationships = []

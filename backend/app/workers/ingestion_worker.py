@@ -95,8 +95,17 @@ class IngestionWorker:
             
             chunks: List[str] = []
             if is_image:
-                # Image documents are processed as a single visual unit
-                chunks = ["[Visual document analysis: base64 image data submitted to Gemini]"]
+                # Image documents are processed by calling Gemini vision to transcribe/describe their content
+                img_mime = "image/jpeg" if file_ext == ".jpg" or file_ext == ".jpeg" else "image/png"
+                if not image_bytes:
+                    raise ValueError("No image bytes available for visual document analysis")
+                logger.info("Describing image content using Gemini Vision", job_id=job_id)
+                parsed_text = await extraction_service.describe_image(image_bytes, mime_type=img_mime)
+                if not parsed_text or "base64 image data" in parsed_text or parsed_text.strip() == "":
+                    raise RuntimeError("Visual document analysis failed to produce valid text description")
+                chunks = extraction_service.chunk_text(parsed_text)
+                if not chunks:
+                    chunks = ["[Empty visual description]"]
             else:
                 chunks = extraction_service.chunk_text(parsed_text)
                 if not chunks:

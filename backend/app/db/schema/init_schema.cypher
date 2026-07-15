@@ -24,7 +24,7 @@ OPTIONS {
 
 // Full-text indexes for fallback keyword search
 CREATE FULLTEXT INDEX equipment_tag_fulltext IF NOT EXISTS
-FOR (e:Equipment) ON EACH [e.tag];
+FOR (e:Equipment) ON EACH [e.tag, e.display_name];
 
 CREATE FULLTEXT INDEX document_properties_fulltext IF NOT EXISTS
-FOR (d:Document) ON EACH [d.id, d.type, d.source_system, d.author];
+FOR (d:Document) ON EACH [d.id, d.name, d.type, d.source_system, d.author];

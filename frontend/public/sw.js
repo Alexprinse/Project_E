@@ -1,7 +1,7 @@
-// Sutradhar — Minimal Service Worker for Offline Shell Caching
+// Marg — Minimal Service Worker for Offline Shell Caching
 // Strategy: Cache-first for static shell routes, network-first for API calls.
 
-const CACHE_NAME = "sutradhar-shell-v1";
+const CACHE_NAME = "marg-shell-v1";
 
 // App shell routes to pre-cache on install
 const SHELL_URLS = [

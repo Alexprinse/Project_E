@@ -118,17 +118,20 @@ class RAGService:
         graph_facts = []
         if query_type == "entity-specific" and entities:
             logger.info("Executing relational graph traversal", tags=entities)
+            from app.db.repositories.graph_repository import normalize_key
+            entities_normalized = [normalize_key(e) for e in entities]
             try:
                 # Retrieve direct neighbors and follow document constraints
                 graph_query = """
                 MATCH (e) WHERE e.tag IN $entities OR e.name IN $entities OR e.id IN $entities OR e.code IN $entities
+                   OR e.tag IN $entities_normalized OR e.name IN $entities_normalized OR e.code IN $entities_normalized
                 MATCH (e)-[r]-(m)
                 OPTIONAL MATCH (m)-[:HAS_DOCUMENT|GOVERNS]-(d:Document)
                 WITH e, r, m, COALESCE(d, m) as doc_node
                 OPTIONAL MATCH (doc_node)-[:HAS_CHUNK]-(c:Chunk)
                 RETURN e, r, m, doc_node.id as doc_id, doc_node.name as doc_name, c.text as chunk_text, c.id as chunk_id
                 """
-                res = self.session.run(graph_query, entities=entities)
+                res = self.session.run(graph_query, entities=entities, entities_normalized=entities_normalized)
                 for record in res:
                     e_props = dict(record["e"])
                     m_props = dict(record["m"])

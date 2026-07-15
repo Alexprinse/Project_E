@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     # Worker Settings
     INGESTION_CONCURRENCY: int = 4
     MAX_DOCUMENT_SIZE_MB: int = 50
-    UPLOAD_DIR: str = "/tmp/project-e/uploads"
+    UPLOAD_DIR: str = "/tmp/marg/uploads"
 
     @property
     def is_dev(self) -> bool:

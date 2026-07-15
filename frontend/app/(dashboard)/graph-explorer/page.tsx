@@ -64,34 +64,46 @@ export default function GraphExplorerPage() {
     }
   };
 
-  // P&ID Schematic Layout Algorithm
+  // P&ID Schematic Layout Algorithm (improved to prevent overlaps on large graphs)
   const layoutNodes = (nodes: NodeSchema[], centerId: string): PositionedNode[] => {
     const centerX = SVG_WIDTH / 2;
     const centerY = SVG_HEIGHT / 2;
-    let index = 0;
+    let docIndex = 0;
+    let locIndex = 0;
+    let paramIndex = 0;
+    let otherIndex = 0;
 
     return nodes.map((node) => {
       if (node.id.toLowerCase() === centerId.toLowerCase() || node.properties.tag === centerId) {
         return { ...node, x: centerX, y: centerY };
       }
       if (node.labels.includes("Document") || node.labels.includes("Chunk")) {
-        const xOffset = centerX - 180 + (index % 3) * 180;
-        index++;
-        return { ...node, x: xOffset, y: centerY + 160 };
+        const col = docIndex % 4;
+        const row = Math.floor(docIndex / 4);
+        const xOffset = centerX - 270 + col * 180;
+        docIndex++;
+        return { ...node, x: xOffset, y: centerY + 160 + row * 60 };
       }
       if (node.labels.includes("Location")) {
-        const xOffset = centerX - 150 + (index % 2) * 300;
-        index++;
-        return { ...node, x: xOffset, y: centerY - 160 };
+        const col = locIndex % 3;
+        const row = Math.floor(locIndex / 3);
+        const xOffset = centerX - 200 + col * 200;
+        locIndex++;
+        return { ...node, x: xOffset, y: centerY - 160 - row * 60 };
       }
       if (node.labels.includes("ProcessParameter")) {
-        const yOffset = centerY - 80 + (index % 3) * 80;
-        index++;
-        return { ...node, x: centerX + 260, y: yOffset };
+        const col = paramIndex % 2;
+        const row = Math.floor(paramIndex / 2);
+        const yOffset = centerY - 120 + row * 80;
+        paramIndex++;
+        return { ...node, x: centerX + 260 + col * 120, y: yOffset };
       }
-      const yOffset = centerY - 120 + (index % 3) * 100;
-      index++;
-      return { ...node, x: centerX - 260, y: yOffset };
+      // Equipment, WorkOrder, Failure, etc.
+      const col = otherIndex % 2;
+      const row = Math.floor(otherIndex / 2);
+      const yOffset = centerY - 120 + row * 80;
+      otherIndex++;
+      return { ...node, x: centerX - 260 - col * 120, y: yOffset };
     });
   };
 

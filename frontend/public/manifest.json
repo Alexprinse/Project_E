@@ -1,6 +1,6 @@
 {
-  "name": "Sutradhar — Industrial Knowledge Terminal",
-  "short_name": "Sutradhar",
+  "name": "Marg — Industrial Knowledge Terminal",
+  "short_name": "Marg",
   "description": "AI-powered Industrial Knowledge Graph and Hybrid RAG QA platform for asset-intensive industries.",
   "start_url": "/",
   "display": "standalone",

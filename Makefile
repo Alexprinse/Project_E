@@ -16,10 +16,12 @@ install:
 # Run development servers locally
 dev:
 	@echo "Starting backend and frontend services locally..."
-	# Run backend on port 8000, frontend on port 3000
-	# (Requires Neo4j running, or use make docker-up)
-	pnpm --dir frontend dev & \
-	cd backend && uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+	# Run backend on port 8000, frontend on port 3001 using concurrently to prevent orphaned processes
+	npx -y concurrently --kill-others \
+		--names "frontend,backend" \
+		--prefix-colors "cyan,magenta" \
+		"pnpm --dir frontend dev" \
+		"cd backend && uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000"
 
 # Docker Compose targets
 docker-up:

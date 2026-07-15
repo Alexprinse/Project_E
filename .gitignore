@@ -50,6 +50,21 @@ yarn-error.log*
 **/uploads/
 **/data/
 
+# Sample / test data (large binaries, not source)
+backend/sample-data/
+scratch/
+
+# Generated / temporary build artifacts
+frontend/tsconfig.tsbuildinfo
+*.tsbuildinfo
+
+# Redundant lockfile (project uses pnpm)
+frontend/package-lock.json
+
+# Generated status and report docs
+PROJECT_STATUS.md
+VERIFICATION_REPORT.md
+
 # Environment and Secrets
 .env
 .env.local

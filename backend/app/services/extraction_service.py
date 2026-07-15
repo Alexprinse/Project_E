@@ -42,12 +42,12 @@ class ExtractionService:
                 "GEMINI_API_KEY is not set. ExtractionService is starting in MOCK mode."
             )
 
-    def chunk_text(self, text: str, chunk_size: int = 12000, overlap: int = 2000) -> List[str]:
+    def chunk_text(self, text: str, chunk_size: int = 20000, overlap: int = 3000) -> List[str]:
         """Splits document text into overlapping segments using a sliding window.
 
         - Rationale: High density industrial documents contain long specifications.
-          Small chunks ensure high entity extraction recall and prevent the model from
-          exceeding max output token limits during structural JSON generation.
+          A chunk size of 20000 characters (~4000 tokens) respects the 10K TPM limits
+          of Voyage AI free tier.
         - Overlap: Ensures relationships bridging split boundaries are not lost.
         """
         if not text:
@@ -132,34 +132,111 @@ class ExtractionService:
             raw_schema = ExtractionResult.model_json_schema()
             cleaned_schema = clean_schema(raw_schema)
 
-            # Invoke async client call
-            response = await self.client.aio.models.generate_content(
-                model=settings.GEMINI_REASONING_MODEL,
-                contents=contents,
-                config=types.GenerateContentConfig(
-                    system_instruction=system_instruction,
-                    response_mime_type="application/json",
-                    response_schema=cleaned_schema,
-                    temperature=0.1,
-                )
-            )
+            # Invoke async client call with retries for rate limits / quota exhaustion
+            import asyncio
+            for attempt in range(6):
+                try:
+                    response = await self.client.aio.models.generate_content(
+                        model=settings.GEMINI_REASONING_MODEL,
+                        contents=contents,
+                        config=types.GenerateContentConfig(
+                            system_instruction=system_instruction,
+                            response_mime_type="application/json",
+                            response_schema=cleaned_schema,
+                            temperature=0.1,
+                        )
+                    )
 
-            # Retrieve Pydantic object
-            if not response.text:
-                raise ValueError("Failed to retrieve valid response text from Gemini response")
-            
-            extraction = ExtractionResult.model_validate_json(response.text)
-            
-            logger.info(
-                "Structured extraction completed",
-                equipments_extracted=len(extraction.equipments),
-                locations_extracted=len(extraction.locations),
-                relationships_extracted=len(extraction.relationships),
-            )
-            return extraction
+                    # Retrieve Pydantic object
+                    if not response.text:
+                        raise ValueError("Failed to retrieve valid response text from Gemini response")
+                    
+                    extraction = ExtractionResult.model_validate_json(response.text)
+                    
+                    logger.info(
+                        "Structured extraction completed",
+                        equipments_extracted=len(extraction.equipments),
+                        locations_extracted=len(extraction.locations),
+                        relationships_extracted=len(extraction.relationships),
+                    )
+                    return extraction
+                except Exception as e:
+                    err_msg = str(e).lower()
+                    if "429" in err_msg or "resource_exhausted" in err_msg or "quota" in err_msg:
+                        wait_sec = 6 + attempt * 4
+                        logger.warning(
+                            "Gemini API rate limit/quota reached. Sleeping before retry.",
+                            attempt=attempt,
+                            wait_seconds=wait_sec,
+                            error=str(e)
+                        )
+                        await asyncio.sleep(wait_sec)
+                    else:
+                        raise e
+            raise RuntimeError("Gemini structured extraction failed after maximum retries due to quota exhaustion.")
 
         except Exception as e:
             logger.error("Failed to perform Gemini structured extraction", error=str(e))
+            raise e
+
+    async def describe_image(
+        self,
+        image_bytes: bytes,
+        mime_type: Optional[str] = "image/png"
+    ) -> str:
+        """Invokes Gemini 2.5 Pro (vision capabilities) to transcribe and describe the diagram or schematic in detail.
+
+        Returns a rich natural language transcription/description of the visual content.
+        """
+        if self.is_mock:
+            logger.info("Generating mock image description (MOCK mode)")
+            return "Mock description: P&ID diagram showing centrifugal pump P-101A and vessel V-102 with flow control loop."
+
+        prompt = (
+            "Analyze the provided engineering diagram (P&ID, schematic, datasheet, or layout). "
+            "Transcribe and describe in detail all information represented: list all equipment tags (e.g. pumps, vessels, valves), "
+            "control loops, instrument lines, process lines, safety systems, operational annotations, and parameters. "
+            "Create a comprehensive engineering summary that is highly useful for downstream semantic search."
+        )
+
+        try:
+            contents: List[Any] = [
+                types.Part.from_bytes(
+                    data=image_bytes,
+                    mime_type=mime_type or "image/png"
+                ),
+                prompt
+            ]
+            
+            import asyncio
+            for attempt in range(6):
+                try:
+                    response = await self.client.aio.models.generate_content(
+                        model=settings.GEMINI_REASONING_MODEL,
+                        contents=contents,
+                    )
+                    if not response.text:
+                        raise ValueError("Failed to retrieve text description from Gemini response")
+                    
+                    desc = response.text.strip()
+                    logger.info("Structured image description completed", chars_count=len(desc))
+                    return desc
+                except Exception as e:
+                    err_msg = str(e).lower()
+                    if "429" in err_msg or "resource_exhausted" in err_msg or "quota" in err_msg:
+                        wait_sec = 6 + attempt * 4
+                        logger.warning(
+                            "Gemini API rate limit/quota reached in image description. Sleeping before retry.",
+                            attempt=attempt,
+                            wait_seconds=wait_sec,
+                            error=str(e)
+                        )
+                        await asyncio.sleep(wait_sec)
+                    else:
+                        raise e
+            raise RuntimeError("Gemini image description failed after maximum retries due to quota exhaustion.")
+        except Exception as e:
+            logger.error("Failed to describe image using Gemini vision", error=str(e))
             raise e
 
     def _generate_mock_result(self, text: Optional[str]) -> ExtractionResult:
@@ -184,7 +261,7 @@ class ExtractionService:
         ]
         
         locations = [
-            Location(name="Refinery Unit 3", plant="Sutradhar Main Plant", unit="Unit 3")
+            Location(name="Refinery Unit 3", plant="Marg Main Plant", unit="Unit 3")
         ]
         
         doc = Document(

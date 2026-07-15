@@ -1,5 +1,5 @@
 [project]
-name = "project-e-backend"
+name = "marg-backend"
 version = "0.1.0"
 description = "FastAPI backend for Project E Knowledge Intelligence Platform"
 readme = "README.md"

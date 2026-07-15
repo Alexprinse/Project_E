@@ -81,6 +81,9 @@ class AgentService:
 
         Intercepts metadata tags dynamically and emits a structured result block at the end.
         """
+        import time
+        start_time = time.time()
+        
         conv_id = conversation_id or str(uuid.uuid4())
         history = self.get_history(conv_id)
 
@@ -129,11 +132,13 @@ class AgentService:
                 await asyncio.sleep(0.08)
                 
             # Emit final completed citations
+            elapsed_time = time.time() - start_time
             done_payload = {
                 "answer": dummy_answer,
                 "citations": dummy_citations,
                 "confidence": "high",
-                "conversation_id": conv_id
+                "conversation_id": conv_id,
+                "execution_time_sec": elapsed_time
             }
             self.add_message(conv_id, "user", query)
             self.add_message(conv_id, "assistant", dummy_answer)
@@ -151,7 +156,7 @@ class AgentService:
         history_str = "".join([f"{m['role'].capitalize()}: {m['content']}\n" for m in history])
 
         system_instruction = (
-            "You are Sutradhar, a highly skilled AI platform for industrial safety, plant "
+            "You are Marg, a highly skilled AI platform for industrial safety, plant "
             "operations, and engineering maintenance. Answer the user's query accurately using "
             "only the provided document contexts and structural graph facts.\n\n"
             "Instructions:\n"
@@ -266,11 +271,13 @@ class AgentService:
                 except Exception as e:
                     logger.warning("Failed to parse streamed metadata JSON string", error=str(e), buffer=clean_meta_str)
 
+            elapsed_time = time.time() - start_time
             done_payload = {
                 "answer": answer.strip(),
                 "citations": citations,
                 "confidence": confidence,
-                "conversation_id": conv_id
+                "conversation_id": conv_id,
+                "execution_time_sec": elapsed_time
             }
 
             # Update session memory log
