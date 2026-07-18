@@ -13,6 +13,10 @@ CREATE CONSTRAINT nonconformance_id_unique IF NOT EXISTS FOR (n:NonConformance) 
 CREATE CONSTRAINT chunk_id_unique IF NOT EXISTS FOR (c:Chunk) REQUIRE c.id IS UNIQUE;
 CREATE CONSTRAINT ingestionjob_id_unique IF NOT EXISTS FOR (j:IngestionJob) REQUIRE j.id IS UNIQUE;
 
+// QueryLog is a structurally-isolated audit trail of past Copilot/RCA queries and answers -
+// it carries NO relationships to the knowledge graph and must never be treated as an entity.
+CREATE CONSTRAINT querylog_id_unique IF NOT EXISTS FOR (q:QueryLog) REQUIRE q.id IS UNIQUE;
+
 // Vector Index on Document Chunk Embeddings (Voyage-3 default 1024 dimensions)
 CREATE VECTOR INDEX chunk_embeddings IF NOT EXISTS
 FOR (c:Chunk) ON (c.embedding)

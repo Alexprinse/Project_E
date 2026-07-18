@@ -4,12 +4,11 @@ import React, { useState, useRef, useEffect } from "react";
 import {
   Send,
   Terminal,
-  AlertTriangle,
-  ShieldCheck,
   ArrowRight,
   Loader2,
   Sparkles,
   BookOpen,
+  History as HistoryIcon,
   X,
   Mic,
   Bot,
@@ -22,6 +21,8 @@ import { BottomSheet } from "@/components/ui/bottom-sheet";
 import { Tabs } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/ui/empty-state";
 import { useStreamingChat } from "@/hooks/use-streaming-chat";
+import { ConfidenceBadge, CitationList } from "@/components/features/copilot/citation-confidence";
+import { HistoryPanel } from "@/components/features/copilot/history-panel";
 import { Citation } from "@/lib/api";
 import { env } from "@/lib/env";
 
@@ -130,25 +131,6 @@ function FormattedMessage({
   );
 }
 
-/* ─── Confidence indicator ─── */
-function ConfidenceBadge({ confidence }: { confidence: string | null }) {
-  if (!confidence) return null;
-  const map = {
-    high:   { variant: "success" as const, icon: ShieldCheck, label: "High Confidence" },
-    medium: { variant: "info"    as const, icon: Sparkles,    label: "Medium Confidence" },
-    low:    { variant: "warning" as const, icon: AlertTriangle, label: "Low Confidence" },
-  };
-  const entry = map[confidence as keyof typeof map];
-  if (!entry) return null;
-  const Icon = entry.icon;
-  return (
-    <Badge variant={entry.variant} dot className="gap-1.5">
-      <Icon className="h-3 w-3" />
-      {entry.label}
-    </Badge>
-  );
-}
-
 /* ─── Citation panel ─── */
 function CitationPanel({
   confidence,
@@ -187,31 +169,7 @@ function CitationPanel({
             <Badge variant="info">{citations.length}</Badge>
           )}
         </div>
-        {citations.length === 0 ? (
-          <div className="py-6 text-center text-[11px] font-mono text-muted-foreground border border-dashed border-border rounded-lg">
-            No citations detected
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {citations.map((cite, idx) => (
-              <button
-                key={idx}
-                onClick={() => onCitationClick(cite)}
-                className="w-full text-left p-3 rounded-lg border border-border bg-muted/10
-                           hover:bg-accent hover:border-border/80 transition-all duration-150
-                           tap-target min-h-[44px] space-y-1.5"
-              >
-                <div className="flex items-center gap-1.5 text-[10px] font-mono text-foreground/80">
-                  <BookOpen className="h-3.5 w-3.5 text-primary shrink-0" />
-                  <span className="truncate font-semibold">{cite.document_name}</span>
-                </div>
-                <p className="text-[10px] text-muted-foreground leading-relaxed line-clamp-2">
-                  &ldquo;{cite.snippet}&rdquo;
-                </p>
-              </button>
-            ))}
-          </div>
-        )}
+        <CitationList citations={citations} onCitationClick={onCitationClick} />
       </div>
 
       <p className="text-[9px] font-mono text-muted-foreground/60 border-t border-border pt-4">
@@ -239,6 +197,14 @@ export default function CopilotPage() {
 
   const [activeCitation, setActiveCitation] = useState<Citation | null>(null);
   const [showSources, setShowSources] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+
+  // Populate the composer from a History entry - no auto-send, no context carried over.
+  const handleSelectHistoryQuery = (queryText: string) => {
+    setInput(queryText);
+    setShowHistory(false);
+    inputRef.current?.focus();
+  };
 
   // Comparison mode
   const [compareMode, setCompareMode] = useState(false);
@@ -278,19 +244,20 @@ export default function CopilotPage() {
     }
   }, [messages, status]);
 
-  // Auto-close sources sheet only when a NEW message arrives (query submitted),
-  // NOT when the sheet is toggled open (which would immediately close it).
+  // Auto-close sources/history sheets only when a NEW message arrives (query submitted),
+  // NOT when a sheet is toggled open (which would immediately close it).
   const prevMsgCount = React.useRef(messages.length);
   useEffect(() => {
     if (messages.length > prevMsgCount.current) {
       setShowSources(false);
+      setShowHistory(false);
     }
     prevMsgCount.current = messages.length;
   }, [messages.length]);
 
   const handleQuerySubmit = (query: string) => {
     if (!query.trim() || loading) return;
-    sendMessage(query);
+    sendMessage(query, compareMode ? "keyword-comparison" : "copilot");
 
     if (compareMode) {
       setKeywordLoading(true);
@@ -356,12 +323,32 @@ export default function CopilotPage() {
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            {!compareMode && (
+              <button
+                onClick={() => {
+                  setShowHistory((v) => !v);
+                  setShowSources(false);
+                }}
+                title="Query History"
+                className={`inline-flex items-center gap-1.5 text-[10px] font-display font-semibold uppercase tracking-wider
+                            border rounded-lg px-3 py-1.5 transition-all duration-150 min-h-[32px] tap-target
+                            ${showHistory
+                              ? "border-primary/40 bg-primary/10 text-primary"
+                              : "border-border bg-transparent text-muted-foreground hover:text-foreground hover:bg-accent"
+                            }`}
+              >
+                <HistoryIcon className="h-3 w-3" />
+                <span className="hidden sm:inline">History</span>
+              </button>
+            )}
+
             <button
               onClick={() => {
                 setCompareMode(!compareMode);
                 clearChat();
                 setKeywordResults([]);
                 setKeywordTime(null);
+                setShowHistory(false);
               }}
               disabled={loading}
               className={`inline-flex items-center gap-1.5 text-[10px] font-display font-semibold uppercase tracking-wider
@@ -600,7 +587,10 @@ export default function CopilotPage() {
                       {/* Sources link — last AI message only */}
                       {isLastAssistant && (
                         <button
-                          onClick={() => setShowSources(true)}
+                          onClick={() => {
+                            setShowSources(true);
+                            setShowHistory(false);
+                          }}
                           className="flex items-center gap-1.5 text-[10px] font-mono text-primary hover:text-primary/80 transition-colors tap-target py-1"
                         >
                           <BookOpen className="h-3 w-3 shrink-0" />
@@ -700,14 +690,18 @@ export default function CopilotPage() {
         </div>
       </div>
 
-      {/* ── Sources Sidebar — desktop ── */}
+      {/* ── Right Sidebar — desktop (History takes priority over Sources when open) ── */}
       {!compareMode && (
         <div className="hidden lg:flex w-80 border-l border-border bg-card flex-col shrink-0 h-full overflow-y-auto scroll-touch">
-          <CitationPanel
-            confidence={confidence}
-            citations={citations}
-            onCitationClick={setActiveCitation}
-          />
+          {showHistory ? (
+            <HistoryPanel onSelectQuery={handleSelectHistoryQuery} />
+          ) : (
+            <CitationPanel
+              confidence={confidence}
+              citations={citations}
+              onCitationClick={setActiveCitation}
+            />
+          )}
         </div>
       )}
 
@@ -728,6 +722,18 @@ export default function CopilotPage() {
             setShowSources(false);
           }}
         />
+      </BottomSheet>
+
+      {/* ── History Bottom Sheet — mobile ── */}
+      <BottomSheet
+        open={showHistory && !compareMode}
+        onClose={() => setShowHistory(false)}
+        title="Query History"
+        maxHeight="80vh"
+        bottomOffset="calc(4.5rem + env(safe-area-inset-bottom, 0px))"
+        className="lg:hidden"
+      >
+        <HistoryPanel onSelectQuery={handleSelectHistoryQuery} />
       </BottomSheet>
 
       {/* ── Citation Detail Modal ── */}

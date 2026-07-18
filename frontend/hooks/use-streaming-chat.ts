@@ -28,7 +28,7 @@ export function useStreamingChat() {
     };
   }, []);
 
-  const sendMessage = useCallback(async (query: string) => {
+  const sendMessage = useCallback(async (query: string, queryType: "copilot" | "keyword-comparison" = "copilot") => {
     if (!query.trim()) return;
 
     // Supersede any previous in-flight stream.
@@ -59,6 +59,7 @@ export function useStreamingChat() {
         body: JSON.stringify({
           query,
           conversation_id: conversationId || undefined,
+          query_type: queryType,
         }),
         signal: controller.signal,
       });

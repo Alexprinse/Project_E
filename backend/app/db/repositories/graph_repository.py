@@ -146,15 +146,18 @@ class GraphRepository(BaseRepository):
         """Retrieves nodes and edges surrounding a particular central node identifier (supports fuzzy lookup)."""
         lower_term = center_node_id.lower().strip()
         
-        # 1. Search for all nodes containing the search term case-insensitively
+        # 1. Search for all nodes containing the search term case-insensitively.
+        # QueryLog is excluded - it's an audit trail, not part of the explorable knowledge graph.
         search_query = """
         MATCH (n)
-        WHERE
+        WHERE NOT n:QueryLog
+          AND (
             (n.id IS NOT NULL AND toLower(n.id) CONTAINS $lower_term) OR
             (n.tag IS NOT NULL AND toLower(n.tag) CONTAINS $lower_term) OR
             (n.name IS NOT NULL AND toLower(n.name) CONTAINS $lower_term) OR
             (n.display_name IS NOT NULL AND toLower(n.display_name) CONTAINS $lower_term) OR
             (n.code IS NOT NULL AND toLower(n.code) CONTAINS $lower_term)
+          )
         RETURN n, labels(n) as labels
         LIMIT 100
         """

@@ -32,10 +32,13 @@ export function BottomSheet({
 
   return (
     <>
-      {/* Backdrop */}
+      {/* Backdrop - must hide in lockstep with the sheet panel below (same className),
+          otherwise it stays full-screen on breakpoints where the sheet itself is hidden
+          (e.g. "lg:hidden" sheets left a dimming overlay covering desktop with nothing
+          visibly attached to it). */}
       <div
         onClick={onClose}
-        className="fixed inset-0 z-40 bg-slate-950/70 sheet-backdrop"
+        className={cn("fixed inset-0 z-40 bg-slate-950/70 sheet-backdrop", className)}
       />
 
       {/* Sheet */}

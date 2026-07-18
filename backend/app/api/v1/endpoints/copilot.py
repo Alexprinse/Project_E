@@ -36,7 +36,8 @@ async def query_copilot(
             async for event in agent_service.stream_chat(
                 query=payload.query,
                 conversation_id=payload.conversation_id,
-                session=session
+                session=session,
+                history_query_type=payload.query_type,
             ):
                 # Assert connection is still active before yielding
                 if await request.is_disconnected():

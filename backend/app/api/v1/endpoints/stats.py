@@ -68,7 +68,7 @@ def get_stats_overview(
             session,
             """
             MATCH (n)
-            WHERE NOT n:Document AND NOT n:Chunk AND NOT n:IngestionJob
+            WHERE NOT n:Document AND NOT n:Chunk AND NOT n:IngestionJob AND NOT n:QueryLog
             RETURN count(n) as count
             """,
             "count",

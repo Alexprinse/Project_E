@@ -9,6 +9,7 @@ from app.agents.copilot_agent import copilot_agent
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.services.rag_service import RAGService
+from app.db.repositories.history_repository import HistoryRepository
 
 logger = get_logger(__name__)
 
@@ -32,6 +33,30 @@ class AgentService:
         # Keep only the last 10 messages to prevent token budget exhaustion
         if len(history) > 10:
             CONVERSATION_MEMORY[conversation_id] = history[-10:]
+
+    def _log_history(
+        self,
+        session: Session,
+        query_type: str,
+        query_text: str,
+        answer_text: str,
+        citations: List[Dict[str, Any]],
+        confidence: Optional[str],
+        execution_time_sec: Optional[float],
+    ) -> None:
+        """Best-effort write to the audit history log. Never raises - a logging failure must
+        not break the user-facing chat response."""
+        try:
+            HistoryRepository(session).log_query(
+                query_type=query_type,
+                query_text=query_text,
+                answer_text=answer_text,
+                citations=citations,
+                confidence=confidence,
+                execution_time_sec=execution_time_sec,
+            )
+        except Exception as e:
+            logger.warning("Failed to write Copilot query to audit history", error=str(e))
 
     async def run_chat(
         self,
@@ -75,7 +100,8 @@ class AgentService:
         self,
         query: str,
         conversation_id: Optional[str],
-        session: Session
+        session: Session,
+        history_query_type: str = "copilot",
     ) -> AsyncGenerator[ServerSentEvent, None]:
         """Orchestrates real-time token streaming and yields SSE structured chunks.
 
@@ -142,7 +168,16 @@ class AgentService:
             }
             self.add_message(conv_id, "user", query)
             self.add_message(conv_id, "assistant", dummy_answer)
-            
+            self._log_history(
+                session=session,
+                query_type=history_query_type,
+                query_text=query,
+                answer_text=dummy_answer,
+                citations=dummy_citations,
+                confidence="high",
+                execution_time_sec=elapsed_time,
+            )
+
             yield ServerSentEvent(event="done", data=json.dumps(done_payload))
             return
 
@@ -283,6 +318,15 @@ class AgentService:
             # Update session memory log
             self.add_message(conv_id, "user", query)
             self.add_message(conv_id, "assistant", answer.strip())
+            self._log_history(
+                session=session,
+                query_type=history_query_type,
+                query_text=query,
+                answer_text=answer.strip(),
+                citations=citations,
+                confidence=confidence,
+                execution_time_sec=elapsed_time,
+            )
 
             yield ServerSentEvent(event="done", data=json.dumps(done_payload))
 

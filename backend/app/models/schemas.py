@@ -78,6 +78,12 @@ class CopilotChatRequest(BaseModel):
     conversation_id: Optional[str] = Field(
         None, description="Optional ID for multi-turn session tracking"
     )
+    query_type: Literal["copilot", "keyword-comparison"] = Field(
+        "copilot",
+        description="Which feature surface triggered this query, for audit history tagging. "
+        "'keyword-comparison' is used when the query was run from the Copilot's side-by-side "
+        "benchmark view against keyword search.",
+    )
 
 
 class Citation(BaseModel):
@@ -95,6 +101,28 @@ class CopilotChatResponse(BaseModel):
         "medium", description="Confidence scoring evaluation"
     )
     conversation_id: str = Field(..., description="The session tracking ID")
+
+
+# Query History / Audit Trail Models
+class HistoryEntryResponse(BaseModel):
+    id: str
+    query_type: str = Field(..., description="Feature that generated this entry: copilot, rca, or keyword-comparison")
+    query_text: str
+    answer_text: str
+    citations: List[Citation] = Field(default_factory=list)
+    confidence: Optional[Literal["high", "medium", "low"]] = None
+    execution_time_sec: Optional[float] = None
+    created_at: Optional[int] = None
+
+
+class HistoryListResponse(BaseModel):
+    entries: List[HistoryEntryResponse] = Field(default_factory=list)
+    count: int = 0
+
+
+class HistoryDeleteResponse(BaseModel):
+    success: bool = True
+    deleted_count: int = 0
 
 
 # Graph Explorer Models

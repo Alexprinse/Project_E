@@ -8,12 +8,36 @@ from sse_starlette.sse import ServerSentEvent
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.agents.rca_agent import rca_agent
+from app.db.repositories.history_repository import HistoryRepository
 
 logger = get_logger(__name__)
 
 
 class RCAService:
     """Manages context gathering and token streaming for Root Cause Analysis (RCA) reports."""
+
+    def _log_history(
+        self,
+        session: Session,
+        query_text: str,
+        answer_text: str,
+        citations: List[Dict[str, Any]],
+        confidence: Optional[str],
+        execution_time_sec: Optional[float],
+    ) -> None:
+        """Best-effort write to the audit history log. Never raises - a logging failure must
+        not break the user-facing RCA response."""
+        try:
+            HistoryRepository(session).log_query(
+                query_type="rca",
+                query_text=query_text,
+                answer_text=answer_text,
+                citations=citations,
+                confidence=confidence,
+                execution_time_sec=execution_time_sec,
+            )
+        except Exception as e:
+            logger.warning("Failed to write RCA analysis to audit history", error=str(e))
 
     async def get_all_failures(self, session: Session) -> List[Dict[str, Any]]:
         """Queries Neo4j for all Failure nodes with display name, severity, date, description, and linked equipment tags."""
@@ -110,6 +134,14 @@ class RCAService:
                 "conversation_id": f"rca-{failure_id}",
                 "execution_time_sec": elapsed_time
             }
+            self._log_history(
+                session=session,
+                query_text=f"RCA analysis: {failure_id}",
+                answer_text=dummy_answer,
+                citations=dummy_citations,
+                confidence="high",
+                execution_time_sec=elapsed_time,
+            )
             yield ServerSentEvent(event="done", data=json.dumps(done_payload))
             return
 
@@ -295,6 +327,14 @@ class RCAService:
                 "conversation_id": f"rca-{failure_id}",
                 "execution_time_sec": elapsed_time
             }
+            self._log_history(
+                session=session,
+                query_text=f"RCA analysis: {failure_id}",
+                answer_text=answer.strip(),
+                citations=citations,
+                confidence=confidence,
+                execution_time_sec=elapsed_time,
+            )
             yield ServerSentEvent(event="done", data=json.dumps(done_payload))
 
         except Exception as e:
