@@ -1,243 +1,236 @@
 # Marg
 
-An AI-powered Industrial Knowledge Intelligence platform that transforms unstructured plant documents into a unified, queryable engineering knowledge graph.
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.110.0-green.svg?style=flat&logo=fastapi)](https://fastapi.tiangolo.com)
-[![Next.js](https://img.shields.io/badge/Next.js-14.1.3-black.svg?style=flat&logo=nextdotjs)](https://nextjs.org)
-[![Neo4j](https://img.shields.io/badge/Neo4j-5.18.0-blue.svg?style=flat&logo=neo4j)](https://neo4j.com)
+A knowledge graph and RAG platform that turns scattered industrial PDFs, P&ID images, and safety reports into a queryable engineering knowledge base — with a chat copilot, a root-cause-analysis assistant, and a graph explorer on top.
 
 ---
 
 ## 1. Problem Statement
 
-Industrial facilities store critical operations data across fragmented manuals, piping & instrumentation diagrams (P&IDs), datasheets, and maintenance logs in varied unstructured formats. Relying on traditional keyword search leads to high retrieval latency, lost structural context, and safety-critical errors during plant maintenance or incidents. Marg addresses this by combining multimodal entity extraction and hybrid graph-vector retrieval to unify fragmented technical assets into a queryable, contextual intelligence network.
+Industrial plants generate their most safety-critical knowledge — operating manuals, P&IDs, incident investigations, regulatory references — as disconnected PDFs and scanned drawings sitting in separate systems. An engineer trying to answer "why did this pump fail, and what governs how we fix it" has to manually cross-reference a maintenance log, a P&ID, and a regulation, because nothing links them. Keyword search over these documents returns pages to read, not answers, and it has no notion of the structural relationships (which equipment belongs to which unit, which regulation governs which failure) that the question actually depends on. Marg addresses this by extracting entities and relationships from these documents into a knowledge graph, and answering questions by combining vector search over the text with graph traversal over the structure.
 
 ---
 
 ## 2. What It Does
 
-Marg delivers a complete pipeline to ingest, extract, store, query, and visualize industrial data:
-
-* **Multimodal Ingestion Pipeline**: Ingests technical documentation (PDFs, CSVs, spreadsheets, markdown, text, and images) using `unstructured`, supporting asynchronous background execution for document parsing.
-* **Gemini-Powered Structured Extraction**: Extracts plant-floor entities (Equipment tags e.g. `P-101`, Locations, Documents, and Process Parameters) along with their directed relationships (e.g. `PART_OF`, `HAS_DOCUMENT`) using Gemini 2.5 Pro multimodal schemas.
-* **Unified Graph & Vector Storage**: Stores document chunks, semantic embeddings, and structural relationships concurrently within a unified Neo4j database, enabling both path traversal and semantic vector index search.
-* **Hybrid Agentic RAG (LangGraph)**: Orchestrates queries using a compiled LangGraph state machine. It classifies query intents, retrieves relevant semantic nodes and multi-hop graph paths, and streams answers using Gemini.
-* **Real-time SSE Chat Streaming**: Streams token responses in real-time using Server-Sent Events (SSE), ending with inline brackets citation metadata (`[DOC-TEST-01]`) and confidence self-assessments.
-* **Interactive Control Room & Graph Explorer**: A dark-themed Next.js control center visualizing extracted graph relationships, managing document ingestion status, and running agent queries.
-* **Baseline Keyword-Search Comparison**: *[In Progress]* Side-by-side benchmarking of hybrid vector-graph answers against basic token-based keyword queries.
+- **Document ingestion** — PDF/text documents are parsed and chunked; P&ID and schematic images (PNG/JPG/PPM) are sent directly to Gemini vision, which produces a detailed engineering transcription that is then chunked and embedded like any other text.
+- **Knowledge graph construction with entity deduplication** — Gemini extracts Equipment, Document, Person, Location, ProcessParameter, Failure, WorkOrder, Regulation, InspectionFinding, Procedure, and NonConformance entities plus directed relationships between them. Entity keys are normalized (lowercased, whitespace/hyphens stripped) before being merged into Neo4j, so `"4-Sidecut Line"`, `"4-sidecut-line"`, and `"4-sidecut line"` all collapse into one canonical node.
+- **Hybrid RAG Copilot** — a LangGraph pipeline classifies the query, retrieves both vector-similar chunks and graph-connected facts, and streams the answer token-by-token over SSE with inline citations (`[DOC-xxx]`) and a self-reported confidence level (high/medium/low). It explicitly says so and cites nothing when a question is out of scope, rather than guessing.
+- **Keyword search with side-by-side Copilot benchmarking** — a real Lucene full-text search (not a mock) runs against the same graph, and the Copilot UI has a "Compare" mode that runs both methods on the same query and reports raw result count + latency for keyword search against the Copilot's synthesized, cited answer + latency — a direct, visible demonstration of time-to-answer versus traditional search.
+- **RCA Assistant** — given a `Failure` node, a LangGraph agent pulls its connected equipment, work orders/inspection findings, and regulations (1–2 hop graph traversal) plus the source document chunks, and generates a structured report with five fixed, cited sections: Root Cause, Contributing Factors, Affected Equipment, Related Regulations, Recommended Action.
+- **Interactive P&ID Graph Explorer** — a force-directed 2D graph of the knowledge graph with independent toggles to show/hide raw text `Chunk` nodes and to show/hide isolated (unconnected) nodes.
+- **Mobile-responsive UI** — sidebars collapse to bottom navigation, detail panels become slide-up bottom sheets with safe-area insets and 44px tap targets, and the graph explorer re-centers on viewport resize.
 
 ---
 
 ## 3. Architecture Overview
 
-Marg bridges the gap between unstructured document processing and graph-grounded agentic reasoning. Below is the end-to-end data pipeline:
+Documents (real PDFs and P&ID images) go through OCR/vision extraction into text, get chunked and embedded, and get run through structured entity extraction. Everything lands in Neo4j, which serves as both the graph store and the vector index. A LangGraph agent layer sits on top and answers queries by combining graph traversal with vector search, and three frontend surfaces (Copilot, RCA Assistant, Graph Explorer) consume that agent layer.
 
 ```mermaid
 flowchart TD
-    subgraph Ingestion [1. Ingestion & Extraction]
-        Docs[Technical Assets: PDF, PNG, CSV, XLSX] --> Parser[Unstructured.io Parser]
-        Parser --> Chunks[Text Chunks]
-        Parser --> Vis[Multimodal Images]
-        Chunks & Vis --> GeminiExt[Gemini 2.5 Pro Fact Extractor]
+    subgraph Ingestion ["1. Ingestion"]
+        PDF[PDF / Text Documents] --> Unstructured[unstructured.partition]
+        PNID["P&ID / Schematic Images (PNG/JPG/PPM)"] --> Vision["Gemini Vision\n(image -> engineering description)"]
+        Unstructured --> Chunker[Sliding-window Chunker]
+        Vision --> Chunker
     end
 
-    subgraph Storage [2. Unified Storage Layer]
-        GeminiExt -->|JSON Facts| Neo4jGraph[(Neo4j Graph Database)]
-        Chunks -->|Text Content| VoyageAI[Voyage AI voyage-3]
-        VoyageAI -->|Embeddings| Neo4jVector[Neo4j Native Vector Index]
+    subgraph Extraction ["2. Entity Extraction"]
+        Chunker --> Gemini["Gemini structured extraction\n(Equipment, Person, Location,\nFailure, Regulation, ...)"]
     end
 
-    subgraph AgenticRAG [3. LangGraph RAG Agent]
-        Query[User Query] --> Intent[Query Classifier]
-        Intent -->|Hybrid Fetch| Retriever[Parallel Search Engine]
-        Neo4jGraph & Neo4jVector --> Retriever
-        Retriever --> Prompt[Context Synthesizer]
-        Prompt --> GeminiReason[Gemini 2.5 Pro Reasoning]
+    subgraph Storage ["3. Neo4j: Graph + Vector Store"]
+        Gemini -->|nodes + relationships| Graph[(Knowledge Graph)]
+        Chunker -->|chunk text| Voyage[Voyage AI voyage-3]
+        Voyage -->|1024-dim embeddings| VectorIndex[(Native Vector Index)]
     end
 
-    subgraph Frontend [4. UI Dashboard]
-        GeminiReason -->|SSE Streaming| SSE[Client SSE Handler]
-        SSE --> UI[Next.js Dashboard & Graph Explorer]
+    subgraph Agents ["4. Hybrid RAG / Agent Layer (LangGraph)"]
+        Query[User Query] --> Classify[Query Classifier]
+        Classify --> Retrieve[Hybrid Retriever]
+        Graph --> Retrieve
+        VectorIndex --> Retrieve
+        Retrieve --> Reason["Gemini Reasoning\n(cited, confidence-scored)"]
+    end
+
+    subgraph Frontend ["5. Frontend (Next.js)"]
+        Reason --> Copilot[Copilot Chat]
+        Graph --> RCA[RCA Assistant]
+        Graph --> Explorer[Graph Explorer]
     end
 ```
-
-1. **Ingestion & Extraction**: Documents are split into overlapping text chunks. For visual files (scanned schemas or forms), images are processed directly. Gemini extracts structured objects.
-2. **Storage**: Extracted entities and relationships are stored as nodes and edges in Neo4j. Chunk texts are embedded using Voyage-3 and indexed in Neo4j's native vector store.
-3. **Agentic RAG**: LangGraph orchestrates query processing. A classifier assesses if queries require direct entity lookups, general semantic search, or out-of-scope filtering. Context is retrieved from both vector matches and neighboring Cypher relationships.
-4. **UI Dashboard**: The frontend handles streaming tokens from FastAPI and renders the real-time response, citations, and interactive subgraphs.
 
 ---
 
 ## 4. Tech Stack
 
-| Layer | Component / Technology | Version / Model |
+| Layer | Component | Version (resolved) |
 | :--- | :--- | :--- |
-| **Backend Core** | FastAPI, Uvicorn | `fastapi>=0.110.0`, `uvicorn>=0.28.0` |
-| **Frontend UI** | Next.js, React 18, Tailwind CSS, Framer Motion | `next^14.1.3`, `react^18.2.0` |
-| **Database** | Neo4j Graph Database (AuraDB or Local) | `neo4j>=5.18.0` |
-| **Vector Index** | Neo4j Native Vector Search | `voyage-3` (1024-dim) |
-| **Agent Framework** | LangGraph, LangChain | `langgraph>=0.0.30`, `langchain>=0.1.12` |
-| **LLM (Extraction & RAG)**| Google GenAI SDK (Gemini) | `gemini-3.1-flash-lite`, `gemini-2.5-pro` |
-| **Embeddings API** | Voyage AI | `voyage-3` |
-| **Parsing & OCR** | Unstructured | `unstructured[all-docs]>=0.12.5` |
-| **Package Managers** | uv (Backend), pnpm (Frontend) | Latest versions |
+| Backend | FastAPI, Uvicorn | `fastapi 0.139.0`, `uvicorn>=0.28.0` |
+| Agent framework | LangGraph, LangChain | `langgraph 1.2.9`, `langchain 1.3.13` |
+| Database | Neo4j (server) | `5.18.0-community` (Docker), driver `6.2.0` |
+| Vector store | Neo4j native vector index | 1024-dim, cosine similarity |
+| Embeddings | Voyage AI | `voyage-3`, `voyageai` SDK `0.5.0` — **real API key active**, not mock |
+| LLM (extraction, RAG, RCA) | Google GenAI SDK | `google-genai 2.11.0`, model **`gemini-3.1-flash-lite`** |
+| Parsing/OCR | Unstructured | `unstructured 0.24.1` (text); Gemini vision (images) |
+| Frontend | Next.js, React, Tailwind, Framer Motion | `next 14.1.3`, `react 18.2.0`, `tailwindcss 3.4.1`, `framer-motion 11.0.8` |
+| Graph rendering | react-force-graph-2d/3d, d3-force, three.js | `react-force-graph 1.29.1` |
+| Package managers | uv (backend), pnpm (frontend) | — |
+
+> **Note on the LLM:** the codebase is configured for and actually runs `gemini-3.1-flash-lite` (set via `GEMINI_REASONING_MODEL` in `.env`) — not Gemini 2.5 Pro. One stale inline comment in `copilot_agent.py` still says `# gemini-2.5-pro`; the setting it annotates is what actually executes, and it resolves to `gemini-3.1-flash-lite`. Swapping models is a one-line `.env` change if 2.5 Pro is wanted for quality reasons.
 
 ---
 
 ## 5. Getting Started
 
 ### Prerequisites
-Ensure you have the following installed locally:
-* **Python**: `v3.11` or `v3.12` (Not compatible with `>=3.13` due to PyTorch/Unstructured limitations)
-* **Node.js**: `v18+` & **pnpm**
-* **uv**: Fast Python packaging tool (`pip install uv` or standard installer)
-* **Neo4j**: Running instance (Local Docker container or Neo4j AuraDB instance)
-* **API Keys**: Gemini API Key, Voyage AI API Key
+- Python 3.11 or 3.12 (not 3.13+, per `unstructured`/PyTorch constraints)
+- Node.js 18+ and pnpm
+- `uv` (Python package manager)
+- Docker (for Neo4j), or a Neo4j 5.18+ instance / AuraDB
+- API keys: **Gemini** and **Voyage AI**
 
 ### Environment Setup
 
-1. **Backend Configuration**:
-   Create a `.env` file in the `backend/` directory:
-   ```bash
-   cp backend/.env.example backend/.env
-   ```
-   Fill in the required variables:
-   * `NEO4J_URI`: Database URI connection string (e.g. `bolt://localhost:7687` or `neo4j+s://...`)
-   * `NEO4J_USERNAME`: Database username (default: `neo4j`)
-   * `NEO4J_PASSWORD`: Database password
-   * `GEMINI_API_KEY`: Google GenAI token for entity extraction and agent reasoning
-   * `VOYAGE_API_KEY`: Voyage AI token for vector embeddings generation
-
-2. **Frontend Configuration**:
-   Create a `.env` file in the `frontend/` directory:
-   ```bash
-   cp frontend/.env.example frontend/.env
-   ```
-   * `NEXT_PUBLIC_API_URL`: Root endpoint URL of the running FastAPI server (default: `http://localhost:8000`)
-
----
-
-### Installation & Run Commands
-
-You can spin up the entire application environment either natively or via Docker Compose.
-
-#### Option A: Native Development (Recommended for fast hot-reload)
-
-1. **Install Dependencies**:
-   Install backend packages and frontend node modules using the root Makefile:
-   ```bash
-   make install
-   ```
-   *(This triggers `uv sync` in the backend and `pnpm install` in the frontend).*
-
-2. **Seed Sample Data**:
-   Populate the Neo4j database with baseline industrial nodes and relations:
-   ```bash
-   make seed
-   ```
-
-3. **Start Development Servers**:
-   Launch both the FastAPI service (port `8000`) and Next.js UI app (port `3001` - routes to `3000` via proxy) concurrently:
-   ```bash
-   make dev
-   ```
-
-#### Option B: Docker Compose
-
-Build and launch all services (Neo4j, backend, frontend) inside isolated containers:
 ```bash
-make docker-up
-```
-To tear down the containers:
-```bash
-make docker-down
+cp backend/.env.example backend/.env
+cp frontend/.env.example frontend/.env
 ```
 
----
+Fill in `backend/.env`:
 
-### Verification & Smoke Tests
+| Variable | Purpose |
+| :--- | :--- |
+| `NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD` | Database connection |
+| `GEMINI_API_KEY` | Entity extraction, RAG/RCA reasoning, vision |
+| `VOYAGE_API_KEY` | Chunk embeddings (voyage-3) |
+| `GEMINI_REASONING_MODEL` | Defaults to `gemini-3.1-flash-lite`; override to try other models |
+| `UPLOAD_DIR`, `INGESTION_CONCURRENCY`, `MAX_DOCUMENT_SIZE_MB` | Ingestion worker tuning |
 
-Verify that your installation was successful:
+Without real `GEMINI_API_KEY`/`VOYAGE_API_KEY` values, both services silently fall back to mock mode (fixed dummy embeddings/extractions) — fine for offline unit tests, not for real ingestion or Copilot answers.
 
-1. **Check Backend Health**:
-   Query the health check API endpoint:
-   ```bash
-   curl http://localhost:8000/api/v1/health
-   ```
-   **Expected Response**:
-   ```json
-   {
-     "status": "ok",
-     "database_connected": true,
-     "version": "0.1.0"
-   }
-   ```
-2. **Access Swagger Docs**:
-   Navigate to `http://localhost:8000/docs` to inspect active API schemas.
-3. **Open Frontend Control Room**:
-   Navigate to `http://localhost:3000` in your web browser. Check that the dashboard metrics load.
+`frontend/.env` just needs `NEXT_PUBLIC_API_URL` (default `http://localhost:8000`).
+
+### Run It
+
+```bash
+make install   # uv sync (backend) + pnpm install (frontend)
+make dev       # runs backend on :8000 and frontend on :3001 concurrently
+```
+
+The backend also needs the Neo4j schema (constraints, vector index, full-text indexes) applied once — run the statements in `backend/app/db/schema/init_schema.cypher` against your database (via `cypher-shell`, Neo4j Browser, or AuraDB console).
+
+Docker Compose alternative: `make docker-up` / `make docker-down` (brings up Neo4j + backend + frontend containers). Note: the frontend container's `docker-compose.yml` command runs the `pnpm dev` dev server (which listens on port 3001 per `package.json`), while only port 3000 is published — for Docker use, prefer building the image as-is (`Dockerfile`'s standalone production server correctly binds `PORT=3000`) rather than the Compose override.
+
+### Smoke Test
+
+```bash
+curl http://localhost:8000/api/v1/health
+# {"status":"ok","database_connected":true,"version":"0.1.0"}
+```
+
+Then open `http://localhost:3001` (native dev) and either upload a document via Ingestion, or query the Copilot directly:
+
+```bash
+curl -N -X POST http://localhost:8000/api/v1/copilot/query \
+  -H "Content-Type: application/json" \
+  -d '{"query":"What caused the Chevron Richmond pipe rupture?","conversation_id":"smoke-test"}'
+```
+
+This streams SSE `token` events followed by a `done` event containing the answer, citations, and confidence.
 
 ---
 
 ## 6. Project Structure
 
-An overview of the codebase organization:
-
 ```text
-├── Makefile                # Unified pipeline commands (install, dev, seed, test, format)
-├── docker-compose.yml      # Multi-container orchestration (App + Neo4j DB)
-├── backend/                # Python FastAPI Service
-│   ├── app/
-│   │   ├── api/v1/         # Versioned endpoints (health, ingestion, copilot, graph)
-│   │   ├── core/           # Config validation (Pydantic), logging setup
-│   │   ├── db/             # Neo4j connection pool and repositories (graph/vector)
-│   │   ├── models/         # Pydantic schemas for request/response serialization
-│   │   ├── services/       # Core business logic (RAG, embedding, extraction, ingestion)
-│   │   ├── agents/         # LangGraph conversational state machines
-│   │   └── workers/        # Async background worker tasks
-│   ├── tests/              # Pytest fixtures and unit suites
-│   ├── pyproject.toml      # Dependency lock and configurations managed via uv
-│   └── Dockerfile          # Backend container specification
-└── frontend/               # Next.js 14 Web Application
-    ├── app/                # App router pages (dashboard control center, copilot, explorer)
-    ├── components/         # Dashboard layouts, custom chart hooks, and feature subcomponents
-    ├── hooks/              # Custom React hooks (e.g., SSE connection tracking)
-    ├── lib/                # API fetch helpers
-    ├── package.json        # Dependencies managed via pnpm
-    └── Dockerfile          # Frontend container specification
+backend/app/
+├── api/v1/endpoints/   # health, ingestion, copilot, rca, search, graph, stats
+├── agents/             # LangGraph state machines: rag_agent, copilot_agent, rca_agent
+├── services/           # extraction_service (Gemini), embedding_service (Voyage),
+│                       #   rag_service, rca_service, ingestion_service
+├── workers/            # ingestion_worker — the actual parse -> extract -> embed -> write pipeline
+├── db/                 # neo4j_connection, repositories (graph_repository, vector_repository)
+│   └── schema/         # init_schema.cypher — constraints + vector + full-text indexes
+├── models/             # extraction.py (entity schemas), schemas.py (API contracts)
+└── tests/              # 10 tests: mocked unit tests + live integration tests against
+                        #   the real Neo4j instance and real CSB documents
+
+frontend/
+├── app/(dashboard)/    # copilot, rca, graph-explorer, ingestion pages
+├── components/features/graph-explorer/  # InteractiveGraph.tsx (force-directed canvas)
+└── components/ui/      # bottom-sheet.tsx and other shared UI primitives
 ```
 
 ---
 
-## 7. Evaluation Notes
+## 7. Real Data Used
 
-Marg addresses key evaluation criteria through measurable design decisions:
+This wasn't tested only against synthetic data. Two public **U.S. Chemical Safety and Hazard Investigation Board (CSB)** final investigation reports are ingested end-to-end in `backend/sample-data/`:
 
-* **Entity Extraction Accuracy**: Utilizes structured schema constraints combined with Gemini 2.5 Pro multimodal processing to extract engineering-specific entities (tags, locations, parameters) with high recall, validated against standard industry manuals.
-* **KG Linkage & Query Quality**: Combines vector lookup with multihop Cypher queries. By fetching adjacent nodes linked to matched entities (e.g., finding the safety manual governing a high-criticality pump), the RAG agent avoids "hallucinating" operating context.
-* **Latency Optimization**: Features a fast regex-based query classifier that intercepts tagged equipment questions to bypass vector retrieval entirely, fetching structural data from Neo4j in under 150ms.
-* **Validation Data**: Tested against public pump manuals, safety datasheets, and P&ID diagrams.
+- **Chevron Richmond Refinery Pipe Rupture and Fire** — CSB Report No. 2012-03-I-CA (January 2015), incident of August 6, 2012 (sulfidation corrosion failure of the #4 Crude Unit's 4-sidecut piping).
+- **Dow Louisiana Operations (Plaquemine, LA) — Explosions, Fires, and Toxic Ethylene Oxide Release** — CSB Report No. 2023-03-I-LA, incident of July 14, 2023.
 
----
+Both are searchable at [csb.gov](https://www.csb.gov) under their report numbers. Alongside these, the graph also contains synthetic SOP documents and P&ID schematic images (as PPM/image files run through the Gemini vision path) used to exercise the Equipment/ProcessParameter extraction and P&ID ingestion paths.
 
-## 8. Known Limitations & Roadmap
-
-### Limitations
-* **Multimodal Extraction Latency**: Visual parsing of highly complex engineering schematics (large blueprints/CAD drawings) takes up to 8-12 seconds per sheet.
-* **Vector Index Setup**: The Neo4j Vector search index (`chunk_embeddings`) must be pre-created in the database schema before ingestion works correctly. Running `make seed` does this setup automatically.
-* **Memory Constraints**: Conversational history tracking is currently stored in-memory (limited to the last 10 messages) and does not persist across backend container restarts.
-
-### Track Completion Status
-* **Track 1 (Ingestion & Parsing)**: **Completed**. Full support for PDF, image, spreadsheet, and text.
-* **Track 2 (Graph & Storage)**: **Completed**. Unified Neo4j Graph + Vector repository layer.
-* **Track 3 (Agentic RAG & Streaming)**: **Completed**. LangGraph orchestrator with active SSE token streaming.
-* **Track 4 (Frontend UI & Visualizer)**: **Completed**. React Graph-Explorer and chat UI.
-* **Track 5 (Baseline Comparative Benchmarks)**: **In Progress**. Stubbed side-by-side search performance comparisons.
+Of the 57 `Document`-labeled nodes currently in the graph, only 6 are actual ingested source files (the two CSB PDFs, two P&ID images, and two text/SOP documents); the remaining ~51 are `Document` *entities* that Gemini extracted because they were referenced or cited inside that source text (e.g. a regulation or a prior report mentioned in a paragraph), not files that went through the pipeline themselves.
 
 ---
 
-## 9. Team & Credits
+## 8. Evaluation Criteria Mapping
 
-* **[Your Name/Team Name]** - *Initial development and architecture*
-* *Built for [hackathon/challenge name] (2026).*
+**Entity extraction accuracy** — live counts from the running Neo4j instance:
+
+| Label | Count |
+| :--- | ---: |
+| Document | 57 (6 ingested source files + 51 referenced-document entities) |
+| Equipment | 44 |
+| Chunk | 28 |
+| ProcessParameter | 23 |
+| Regulation | 16 |
+| Person | 14 |
+| Failure | 9 |
+| Location | 7 |
+| WorkOrder | 1 |
+
+Total: 199 nodes, 269 relationships. A Cypher aggregation on the dedup keys (`tag`/`name`/`code`) shows no duplicate normalized entities.
+
+**Query answer quality** — the RCA Assistant reliably produces all five required sections (verified live against the Chevron sulfidation failure node, with citations back to `chevron_final_investigation_report.pdf`). The Copilot's confidence/refusal behavior was verified directly: asked *"What is the maintenance schedule for a nuclear reactor?"* (out of scope), it responded with **no citations, `confidence: "high"`**, and an explicit statement that the ingested documents don't cover that topic, rather than fabricating an answer.
+
+**Knowledge graph linkage completeness** — of the 114 non-Chunk, non-Document entity nodes, **16 (14.0%) are fully isolated** (no relationships): 10 Equipment, 4 ProcessParameter, 2 Person. Inspecting them shows they're instrument/control-loop tags and parameter names (e.g. `FV-101`, `LT-102`, `Reflux Flow`) that Gemini extracted as entities from a chunk's text but for which it didn't also emit an explicit relationship in that same extraction call — an expected consequence of chunk-by-chunk extraction rather than a data-quality bug. The remainder of the gap is a known topology-extraction limitation: relationships are only as complete as what Gemini identifies per chunk, so entities mentioned in passing (rather than in a structurally explicit sentence) are more likely to end up unlinked.
+
+**Time-to-answer vs. traditional search** — measured live on the query *"sulfidation corrosion"*: keyword search returned 15 ranked chunk matches (~40,800 words of raw text to read) in **0.07s**; the Copilot returned a single synthesized, cited answer in **~5.3s**. The UI's own "Benchmarking Delta Analysis" banner reports exactly this trade-off (raw record count + latency vs. synthesized answer + latency, plus an estimated word count saved) on every comparison run.
+
+**Real document validation** — both CSB reports ingest, chunk, embed, and extract successfully; the RCA and Copilot integration tests assert (and pass) that answers about the Chevron incident cite the actual `chevron_final_investigation_report.pdf`.
+
+---
+
+## 9. Track Completion Status
+
+| Track | Status | Notes |
+| :--- | :--- | :--- |
+| **1 — Ingestion & KG Agent** | **Working** | PDF/text parsing and P&ID image vision extraction are both implemented and verified end-to-end. Spreadsheets, email archives, and scanned forms are not implemented — `unstructured`'s generic partitioner could technically attempt other formats, but only PDF/text and image inputs have been tested against real documents. |
+| **2 — Expert Knowledge Copilot** | **Working** | Hybrid vector+graph retrieval, SSE token streaming, inline citations, and confidence scoring are all live and verified against real ingested documents. |
+| **3 — Maintenance Intelligence & RCA Agent** | **Working** | The RCA Assistant generates the required five-section structured report from `Failure` nodes, grounded in graph-linked equipment/work orders/regulations and cited source chunks. |
+| **4 — Quality & Regulatory Compliance** | **Not implemented** | No dedicated compliance-checking logic exists (no NCR-workflow or automated regulation-conformance endpoints). Descoped deliberately to go deep on ingestion, RAG, and RCA rather than spread thin across five tracks in the available time. |
+| **5 — Lessons Learned & Failure Intelligence** | **Not implemented** | No cross-incident trend/lessons-learned aggregation feature exists beyond the per-failure RCA report. Same scoping call as Track 4. |
+
+Three of five tracks are built deep and verified against real safety-critical documents, not stubbed.
+
+---
+
+## 10. Known Limitations
+
+- **Isolated nodes**: ~14% of entity nodes (16/114) have no graph relationships — see §8 for why.
+- **Voyage AI free-tier rate limits**: 3 requests/minute, 10K tokens/minute. `embedding_service.py` batches at `batch_size=1` and sleeps 22s between batches to stay under this — ingesting a document with many chunks can take several minutes. Gemini calls also back off on 429/quota errors (up to 6 retries).
+- **No frontend automated tests**: `pnpm test` is a placeholder (`"echo \"No tests specified yet\""`); the backend has 10 passing pytest tests (mocked unit tests + live integration tests), but frontend correctness relies on manual verification.
+- **In-memory ingestion job cache**: job status has a DB-persisted fallback, but the primary path is an in-process dict, so status can be lost across backend restarts if the DB write also fails.
+- **`make seed`** (`app/scripts/seed_data.py`) reads from a hardcoded external path (`Project_E_T/data-gen/output`) that doesn't exist in this environment — it is not currently a working way to reproduce the seeded dataset; the documents that are in the graph today were ingested via the API directly.
+- **Docker Compose port mismatch**: the frontend's Compose service command (`pnpm dev`, port 3001) doesn't match its published port (3000) or the Dockerfile's standalone production server (port 3000) — see §5.
+- **No LICENSE file** in the repo — the previous README's MIT badge did not correspond to an actual license file and has been dropped rather than carried forward unverified.
+
+---
+
+## 11. Team & Credits
+
+*[Add names/roles here.]*

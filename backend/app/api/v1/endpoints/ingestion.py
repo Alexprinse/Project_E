@@ -2,7 +2,12 @@ from fastapi import APIRouter, File, UploadFile, BackgroundTasks, HTTPException,
 from neo4j import Session
 from app.db.neo4j_connection import get_neo4j_session
 from app.services.ingestion_service import IngestionService
-from app.models.schemas import IngestionTriggerResponse, IngestionStatusResponse
+from app.models.schemas import (
+    IngestionTriggerResponse,
+    IngestionStatusResponse,
+    IngestionJobsResponse,
+    IngestionJobResponse,
+)
 
 router = APIRouter()
 ingestion_service = IngestionService()
@@ -11,33 +16,71 @@ ingestion_service = IngestionService()
 @router.post("", response_model=IngestionTriggerResponse)
 async def upload_document(
     background_tasks: BackgroundTasks,
-    file: UploadFile = File(...)
+    file: UploadFile = File(...),
+    session: Session = Depends(get_neo4j_session),
 ) -> IngestionTriggerResponse:
     """Accepts document uploads (PDF, spreadsheet) and triggers background ingestion worker."""
     # Simple validation of file types
-    allowed_extensions = {".pdf", ".csv", ".xlsx", ".txt", ".md", ".png", ".jpg", ".jpeg", ".ppm"}
+    allowed_extensions = {
+        ".pdf",
+        ".csv",
+        ".xlsx",
+        ".txt",
+        ".md",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".ppm",
+    }
     import os
+
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in allowed_extensions:
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported file format. Supported extensions: {allowed_extensions}"
+            detail=f"Unsupported file format. Supported extensions: {allowed_extensions}",
         )
 
-    job_id = await ingestion_service.ingest_document(file, background_tasks)
+    job_id = await ingestion_service.ingest_document(
+        file, background_tasks, session=session
+    )
 
     return IngestionTriggerResponse(
         job_id=job_id,
         filename=file.filename or "unknown",
         status="QUEUED",
-        message="Document processing initiated in background."
+        message="Document processing initiated in background.",
+    )
+
+
+@router.get("/jobs", response_model=IngestionJobsResponse)
+def list_ingestion_jobs(
+    limit: int = 50, session: Session = Depends(get_neo4j_session)
+) -> IngestionJobsResponse:
+    """Lists recent ingestion jobs from persisted job state."""
+    jobs = ingestion_service.list_jobs(session, limit=limit)
+    return IngestionJobsResponse(
+        jobs=[
+            IngestionJobResponse(
+                id=job["id"],
+                file_name=job["file_name"],
+                status=job["status"],
+                progress=job["progress"],
+                error=job.get("error"),
+                created_at=job.get("created_at"),
+                updated_at=job.get("updated_at"),
+            )
+            for job in jobs
+        ]
     )
 
 
 @router.get("/{job_id}", response_model=IngestionStatusResponse)
-def get_ingestion_status(job_id: str) -> IngestionStatusResponse:
+def get_ingestion_status(
+    job_id: str, session: Session = Depends(get_neo4j_session)
+) -> IngestionStatusResponse:
     """Queries current progress and status of a document ingestion job."""
-    status_data = ingestion_service.get_job_status(job_id)
+    status_data = ingestion_service.get_job_status(job_id, session=session)
     if status_data.get("status") == "NOT_FOUND":
         raise HTTPException(status_code=404, detail="Ingestion job not found.")
 
@@ -46,19 +89,18 @@ def get_ingestion_status(job_id: str) -> IngestionStatusResponse:
         file_name=status_data["file_name"],
         status=status_data["status"],
         progress=status_data["progress"],
-        error=status_data.get("error")
+        error=status_data.get("error"),
     )
 
 
 @router.delete("/{document_id}")
-def delete_document(
-    document_id: str,
-    session: Session = Depends(get_neo4j_session)
-):
+def delete_document(document_id: str, session: Session = Depends(get_neo4j_session)):
     """Purges a document asset and its exclusively connected graph entity nodes."""
     try:
         ingestion_service.delete_document(document_id, session)
-        return {"success": True, "message": "Document successfully purged from schematic."}
+        return {
+            "success": True,
+            "message": "Document successfully purged from schematic.",
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-

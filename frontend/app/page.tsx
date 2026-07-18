@@ -19,15 +19,7 @@ import Link from "next/link";
 import { MetricCard } from "@/components/ui/metric-card";
 import { Card, CardHeader, CardTitle, CardBody } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-
-interface IngestionJobCache {
-  jobId: string;
-  name: string;
-  size: string;
-  progress: number;
-  status: string;
-  timestamp: string;
-}
+import { api, StatsOverviewResponse } from "@/lib/api";
 
 interface ActivityItem {
   id: string;
@@ -35,13 +27,6 @@ interface ActivityItem {
   type: "success" | "error" | "warning" | "info";
   time: string;
 }
-
-const MOCK_ACTIVITIES: ActivityItem[] = [
-  { id: "SYS-MIG-1", msg: "Constraint equipment_tag_unique validated", type: "success", time: "14:00" },
-  { id: "SYS-IDX-2", msg: "Vector index chunk_embeddings [1024 dims] created", type: "success", time: "14:02" },
-  { id: "DOC-990-2", msg: "Ingested: Operating Specifications M-12", type: "success", time: "15:10" },
-  { id: "EQ-101-A", msg: "Pump P-101 merged — feed relationship resolved", type: "success", time: "15:12" },
-];
 
 const QUICK_LINKS = [
   {
@@ -93,33 +78,47 @@ const activityBadgeVariant: Record<string, "success" | "danger" | "warning" | "i
 };
 
 export default function DashboardHome() {
-  const [docCount, setDocCount] = useState(4);
-  const [entityCount, setEntityCount] = useState(154);
+  const [stats, setStats] = useState<StatsOverviewResponse | null>(null);
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [mounted, setMounted] = useState(false);
+  const [statsError, setStatsError] = useState<string | null>(null);
 
   useEffect(() => {
     setMounted(true);
-    try {
-      const cached = localStorage.getItem("marg_uploads");
-      if (cached) {
-        const jobs = JSON.parse(cached) as IngestionJobCache[];
-        const completeCount = jobs.filter((j) => j.status === "COMPLETED").length;
-        setDocCount(completeCount + 4);
-        setEntityCount(completeCount * 14 + 154);
-        const acts: ActivityItem[] = jobs.map((j) => ({
-          id: j.jobId,
-          msg: `Ingested: ${j.name} — ${j.status}`,
-          type: j.status === "COMPLETED" ? "success" : j.status === "FAILED" ? "error" : "warning",
-          time: j.timestamp?.slice(11, 16) || "—",
-        }));
-        setActivities([...acts, ...MOCK_ACTIVITIES]);
-      } else {
-        setActivities(MOCK_ACTIVITIES);
+
+    const loadStats = async () => {
+      try {
+        const overview = await api.getStatsOverview();
+        setStats(overview);
+        setStatsError(null);
+
+        const liveActivities: ActivityItem[] = overview.recent_jobs.map((job) => {
+          const updatedAt = job.updated_at ? new Date(job.updated_at).toTimeString().slice(0, 5) : "--";
+          return {
+            id: job.id,
+            msg: `Ingestion: ${job.file_name} - ${job.status}`,
+            type: job.status === "COMPLETED" ? "success" : job.status === "FAILED" ? "error" : "warning",
+            time: updatedAt,
+          };
+        });
+        setActivities(liveActivities.length ? liveActivities : [{
+          id: "NO-JOBS",
+          msg: "No ingestion jobs recorded yet",
+          type: "info",
+          time: "--",
+        }]);
+      } catch {
+        setStatsError("Backend metrics unavailable");
+        setActivities([{
+          id: "API-OFFLINE",
+          msg: "Backend metrics unavailable",
+          type: "error",
+          time: "--",
+        }]);
       }
-    } catch {
-      setActivities(MOCK_ACTIVITIES);
-    }
+    };
+
+    loadStats();
   }, []);
 
   if (!mounted) {
@@ -155,14 +154,18 @@ export default function DashboardHome() {
             <div className="shrink-0 flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-card">
               <span className="status-dot status-dot-online" />
               <div className="text-right hidden sm:block">
-                <div className="text-[10px] font-mono text-teal-success uppercase tracking-wider font-semibold">
-                  All Systems
+                <div className={`text-[10px] font-mono uppercase tracking-wider font-semibold ${
+                  stats?.database_connected ? "text-teal-success" : "text-amber-warning"
+                }`}>
+                  {stats?.database_connected ? "Database Online" : "Degraded"}
                 </div>
                 <div className="text-[9px] font-mono text-muted-foreground">
-                  Unit 3 Overseer
+                  {statsError || "Live overview"}
                 </div>
               </div>
-              <span className="sm:hidden text-[10px] font-mono text-teal-success font-bold uppercase">Live</span>
+              <span className="sm:hidden text-[10px] font-mono text-teal-success font-bold uppercase">
+                {stats?.database_connected ? "Live" : "Degraded"}
+              </span>
             </div>
           </div>
         </div>
@@ -172,41 +175,41 @@ export default function DashboardHome() {
           <MetricCard
             icon={Database}
             label="Docs Ingested"
-            value={docCount}
-            subtitle="Active plant flowsheets & manuals"
+            value={stats?.document_count ?? "—"}
+            subtitle="Documents with indexed chunks"
             variant="info"
-            trend="up"
-            trendLabel="+2 this week"
+            trend="flat"
+            trendLabel={`${stats?.completed_ingestion_jobs ?? 0} completed jobs`}
             delay={0}
           />
           <MetricCard
             icon={Network}
             label="Graph Entities"
-            value={entityCount}
-            subtitle="Tag mappings resolved in Neo4j"
+            value={stats?.entity_count ?? "—"}
+            subtitle="Equipment, locations, failures, and more"
             variant="success"
-            trend="up"
-            trendLabel="Fully resolved"
+            trend="flat"
+            trendLabel={`${stats?.active_ingestion_jobs ?? 0} active jobs`}
             delay={70}
           />
           <MetricCard
             icon={Clock}
-            label="Avg Response"
-            value="2.4s"
-            subtitle="Hybrid vector-graph resolution"
+            label="Chunks Indexed"
+            value={stats?.chunk_count ?? "—"}
+            subtitle="Vector-searchable document segments"
             variant="default"
-            trend="down"
-            trendLabel="↓ 0.3s vs baseline"
+            trend="flat"
+            trendLabel={stats?.vector_index_state || "Index unknown"}
             delay={140}
           />
           <MetricCard
             icon={ShieldAlert}
-            label="Compliance"
+            label="Failures"
             variant="warning"
-            value="—"
-            subtitle="Automated regulatory audits"
+            value={stats?.failure_count ?? "—"}
+            subtitle="Failure events available for RCA"
             badge={
-              <Badge variant="warning">Soon</Badge>
+              stats?.failed_ingestion_jobs ? <Badge variant="danger">{stats.failed_ingestion_jobs} failed jobs</Badge> : undefined
             }
             delay={210}
           />
@@ -217,19 +220,21 @@ export default function DashboardHome() {
           <CardBody className="py-3 px-5">
             <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
               <div className="flex items-center gap-2 text-[11px] font-mono">
-                <span className="status-dot status-dot-online" />
+                <span className={`status-dot ${stats?.database_connected ? "status-dot-online" : ""}`} />
                 <span className="text-muted-foreground">Neo4j AuraDB</span>
-                <Badge variant="success" className="text-[8px]">Connected</Badge>
+                <Badge variant={stats?.database_connected ? "success" : "warning"} className="text-[8px]">
+                  {stats?.database_connected ? "Connected" : "Degraded"}
+                </Badge>
               </div>
               <div className="flex items-center gap-2 text-[11px] font-mono">
                 <span className="status-dot status-dot-online" />
                 <span className="text-muted-foreground">Gemini 2.5 Pro</span>
-                <Badge variant="success" className="text-[8px]">Online</Badge>
+                <Badge variant="info" className="text-[8px]">Configured by backend</Badge>
               </div>
               <div className="flex items-center gap-2 text-[11px] font-mono">
                 <span className="status-dot status-dot-online" />
                 <span className="text-muted-foreground">Vector Index</span>
-                <Badge variant="info" className="text-[8px]">1024-dim</Badge>
+                <Badge variant="info" className="text-[8px]">{stats?.vector_index_state || "Unknown"}</Badge>
               </div>
               <div className="ml-auto hidden md:flex items-center gap-1.5 text-[10px] font-mono text-muted-foreground">
                 <Zap className="h-3 w-3 text-primary" />

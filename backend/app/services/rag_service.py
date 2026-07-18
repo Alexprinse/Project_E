@@ -24,9 +24,14 @@ class RAGService:
 
         Uses a fast regex check first, falling back to a quick Gemini Flash query check.
         """
-        # First pass: Regex for standard industrial equipment tag formats (e.g. P-101, V-202, PL-01-A)
-        tag_pattern = r"\b[A-Z0-9]+-[0-9A-Z\-]+\b"
-        tags = re.findall(tag_pattern, query.upper())
+        # First pass: Regex for standard industrial equipment tag formats (e.g. P-101, V-202,
+        # PL-01-A, 4-SIDECUT). Real tags always contain at least one digit somewhere in the
+        # hyphenated span, whereas ordinary hyphenated English phrases ("follow-up",
+        # "state-of-the-art", "on-site") never do - filtering on that avoids misclassifying
+        # such phrases as entity tags, which used to short-circuit classify_query before the
+        # Gemini out-of-scope check ever ran.
+        tag_pattern = r"\b[A-Z0-9]+(?:-[A-Z0-9]+)+\b"
+        tags = [t for t in re.findall(tag_pattern, query.upper()) if any(ch.isdigit() for ch in t)]
         if tags:
             logger.info("Regex classifier matched industrial entity tags", tags=tags)
             return {"type": "entity-specific", "entities": list(set(tags))}

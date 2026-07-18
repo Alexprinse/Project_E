@@ -13,7 +13,6 @@ dependencies = [
     "neo4j>=5.18.0",
     "langchain>=0.1.12",
     "langgraph>=0.0.30",
-    "anthropic>=0.21.0",
     "voyageai>=0.2.1",
     "unstructured[all-docs]>=0.12.5",
     "python-multipart>=0.0.9",
@@ -47,5 +46,4 @@ venv = ".venv"
 
 [tool.pyrefly]
 python-interpreter-path = ".venv/bin/python"
-
 

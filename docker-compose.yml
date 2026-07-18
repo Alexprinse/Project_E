@@ -34,7 +34,7 @@ services:
       - NEO4J_PASSWORD=password123
       - ENVIRONMENT=development
       - LOG_LEVEL=debug
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
       - VOYAGE_API_KEY=${VOYAGE_API_KEY}
     depends_on:
       neo4j:

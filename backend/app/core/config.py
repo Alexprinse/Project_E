@@ -20,15 +20,12 @@ class Settings(BaseSettings):
     NEO4J_USERNAME: str = Field(default="neo4j")
     NEO4J_PASSWORD: str = Field(default="password123")
 
-    # API Keys (required in production, fallback to dummy or optional for skeleton)
-    ANTHROPIC_API_KEY: str = Field(default="mock-key-for-skeleton")
+    # API Keys (required in production, fallback to mock mode for local tests)
     GEMINI_API_KEY: str = Field(default="mock-key-for-skeleton")
     VOYAGE_API_KEY: str = Field(default="mock-key-for-skeleton")
 
     # Model parameters
     VOYAGE_EMBED_MODEL: str = "voyage-3"
-    CLAUDE_REASONING_MODEL: str = "claude-3-5-sonnet-20240620"
-    CLAUDE_CLASSIFICATION_MODEL: str = "claude-3-haiku-20240307"
     GEMINI_REASONING_MODEL: str = "gemini-3.1-flash-lite"
     GEMINI_LIGHTWEIGHT_MODEL: str = "gemini-3.1-flash-lite"
 

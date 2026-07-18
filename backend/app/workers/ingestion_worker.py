@@ -19,12 +19,110 @@ class IngestionWorker:
     """Orchestrates document ingestion background workflows: parsing, chunking, extraction, and embedding."""
 
     @staticmethod
+    def _safe_persist_job(job_id: str) -> None:
+        """Best-effort persistence for job cache updates."""
+        try:
+            session = neo4j_service.get_session()
+        except Exception as e:
+            logger.debug("Skipping ingestion job persistence; Neo4j unavailable", error=str(e))
+            return
+
+        try:
+            IngestionWorker.persist_job(job_id, session)
+        except Exception as e:
+            logger.warning("Failed to persist ingestion job state", job_id=job_id, error=str(e))
+        finally:
+            session.close()
+
+    @staticmethod
+    def persist_job(job_id: str, session: Session) -> None:
+        """Writes the current in-memory job state to Neo4j."""
+        job = INGESTION_JOBS.get(job_id)
+        if not job:
+            return
+
+        query = """
+        MERGE (j:IngestionJob {id: $id})
+        ON CREATE SET j.created_at = timestamp()
+        SET j.file_name = $file_name,
+            j.status = $status,
+            j.progress = $progress,
+            j.error = $error,
+            j.updated_at = timestamp()
+        RETURN j.id as id
+        """
+        session.run(
+            query,
+            id=job["id"],
+            file_name=job["file_name"],
+            status=job["status"],
+            progress=job["progress"],
+            error=job.get("error"),
+        )
+
+    @staticmethod
+    def get_job_status_from_db(job_id: str, session: Session) -> Dict[str, Any]:
+        """Retrieves persisted ingestion job state from Neo4j."""
+        query = """
+        MATCH (j:IngestionJob {id: $job_id})
+        RETURN j.id as id,
+               j.file_name as file_name,
+               j.status as status,
+               j.progress as progress,
+               j.error as error,
+               j.created_at as created_at,
+               j.updated_at as updated_at
+        """
+        result = session.run(query, job_id=job_id)
+        record = result.single()
+        if not record:
+            return {"status": "NOT_FOUND"}
+        return {
+            "id": record["id"],
+            "file_name": record["file_name"],
+            "status": record["status"],
+            "progress": record["progress"],
+            "error": record["error"],
+            "created_at": record["created_at"],
+            "updated_at": record["updated_at"],
+        }
+
+    @staticmethod
+    def list_jobs_from_db(session: Session, limit: int = 50) -> List[Dict[str, Any]]:
+        """Lists recent persisted ingestion jobs."""
+        query = """
+        MATCH (j:IngestionJob)
+        RETURN j.id as id,
+               j.file_name as file_name,
+               j.status as status,
+               j.progress as progress,
+               j.error as error,
+               j.created_at as created_at,
+               j.updated_at as updated_at
+        ORDER BY coalesce(j.updated_at, j.created_at, 0) DESC
+        LIMIT $limit
+        """
+        records = session.run(query, limit=limit)
+        return [
+            {
+                "id": rec["id"],
+                "file_name": rec["file_name"],
+                "status": rec["status"],
+                "progress": rec["progress"],
+                "error": rec["error"],
+                "created_at": rec["created_at"],
+                "updated_at": rec["updated_at"],
+            }
+            for rec in records
+        ]
+
+    @staticmethod
     def get_job_status(job_id: str) -> Dict[str, Any]:
         """Retrieves active job execution progress."""
         return INGESTION_JOBS.get(job_id, {"status": "NOT_FOUND"})
 
     @classmethod
-    def start_job(cls, job_id: str, file_name: str) -> None:
+    def start_job(cls, job_id: str, file_name: str, session: Session | None = None) -> None:
         """Registers a new background execution thread state."""
         INGESTION_JOBS[job_id] = {
             "id": job_id,
@@ -34,6 +132,19 @@ class IngestionWorker:
             "error": None,
         }
         logger.info("Ingestion job initialized", job_id=job_id, file=file_name)
+        if session:
+            cls.persist_job(job_id, session)
+        else:
+            cls._safe_persist_job(job_id)
+
+    @classmethod
+    def update_job(cls, job_id: str, **updates: Any) -> Dict[str, Any]:
+        """Updates cached job state and persists it best-effort."""
+        if job_id not in INGESTION_JOBS:
+            cls.start_job(job_id, updates.get("file_name") or "unknown")
+        INGESTION_JOBS[job_id].update(updates)
+        cls._safe_persist_job(job_id)
+        return INGESTION_JOBS[job_id]
 
     @classmethod
     async def process_document(cls, job_id: str, file_path: str) -> None:
@@ -41,8 +152,7 @@ class IngestionWorker:
         if job_id not in INGESTION_JOBS:
             cls.start_job(job_id, os.path.basename(file_path))
 
-        job = INGESTION_JOBS[job_id]
-        job["status"] = "PROCESSING"
+        cls.update_job(job_id, status="PROCESSING")
         logger.info("Processing document ingestion", job_id=job_id, path=file_path)
 
         try:
@@ -50,7 +160,7 @@ class IngestionWorker:
             embedding_service = EmbeddingService()
             
             # Step 1: Parse Document
-            job["progress"] = 15
+            cls.update_job(job_id, progress=15)
             logger.info("Step 1: Parsing file contents", job_id=job_id)
             
             file_ext = os.path.splitext(file_path)[1].lower()
@@ -90,7 +200,7 @@ class IngestionWorker:
                         parsed_text = txt_file.read()
 
             # Step 2: Document Chunking
-            job["progress"] = 30
+            cls.update_job(job_id, progress=30)
             logger.info("Step 2: Partitioning text into semantic window chunks", job_id=job_id)
             
             chunks: List[str] = []
@@ -112,7 +222,7 @@ class IngestionWorker:
                     chunks = ["[Empty document text context]"]
 
             # Step 3: Structured Knowledge Extraction using Gemini 2.5
-            job["progress"] = 55
+            cls.update_job(job_id, progress=55)
             logger.info("Step 3: Extracting engineering entities and links via Gemini 2.5", job_id=job_id)
             
             # Aggregate structures extracted from each chunk
@@ -132,12 +242,12 @@ class IngestionWorker:
                     cls._merge_extraction_blocks(merged_result, extraction)
 
             # Step 4: Generate Embeddings using Voyage AI
-            job["progress"] = 75
+            cls.update_job(job_id, progress=75)
             logger.info("Step 4: Compiling chunk vectors via Voyage AI", job_id=job_id, count=len(chunks))
             embeddings = await embedding_service.get_embeddings(chunks)
 
             # Step 5: Save Graph State to Neo4j
-            job["progress"] = 90
+            cls.update_job(job_id, progress=90)
             logger.info("Step 5: Writing graph node/relation transaction blocks to Neo4j", job_id=job_id)
             
             session = neo4j_service.get_session()
@@ -335,8 +445,7 @@ class IngestionWorker:
                 session.close()
 
             # Ingestion Complete
-            job["progress"] = 100
-            job["status"] = "COMPLETED"
+            cls.update_job(job_id, progress=100, status="COMPLETED", error=None)
             logger.info(
                 "Ingestion pipeline completed successfully",
                 job_id=job_id,
@@ -346,8 +455,7 @@ class IngestionWorker:
             )
 
         except Exception as e:
-            job["status"] = "FAILED"
-            job["error"] = str(e)
+            cls.update_job(job_id, status="FAILED", error=str(e))
             logger.error("Ingestion pipeline execution aborted with failure", job_id=job_id, error=str(e))
             raise e
 

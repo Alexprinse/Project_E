@@ -48,7 +48,10 @@ function parseLineWithCitations(line: string, citations: Citation[]): React.Reac
           segments.push(", ");
         }
 
-        const citation = citations.find(c => c.document_id.toLowerCase() === docId.toLowerCase());
+        const cleanDocId = docId.toLowerCase().startsWith("doc-")
+          ? docId.substring(4)
+          : docId;
+        const citation = citations.find(c => c.document_id.toLowerCase() === cleanDocId.toLowerCase());
         if (citation) {
           segments.push(
             <span
@@ -231,6 +234,7 @@ export default function CopilotPage() {
 
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const [activeCitation, setActiveCitation] = useState<Citation | null>(null);
@@ -243,8 +247,35 @@ export default function CopilotPage() {
   const [keywordLoading, setKeywordLoading] = useState(false);
   const [keywordTime, setKeywordTime] = useState<number | null>(null);
 
+  const [viewportHeight, setViewportHeight] = useState("100%");
+
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (typeof window === "undefined" || !window.visualViewport) return;
+
+    const vv = window.visualViewport;
+    const handleResize = () => {
+      setViewportHeight(`${vv.height}px`);
+    };
+
+    vv.addEventListener("resize", handleResize);
+    vv.addEventListener("scroll", handleResize);
+
+    // Initial call
+    handleResize();
+
+    return () => {
+      vv.removeEventListener("resize", handleResize);
+      vv.removeEventListener("scroll", handleResize);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTo({
+        top: chatContainerRef.current.scrollHeight,
+        behavior: "smooth",
+      });
+    }
   }, [messages, status]);
 
   // Auto-close sources sheet only when a NEW message arrives (query submitted),
@@ -303,7 +334,7 @@ export default function CopilotPage() {
   const lastAssistantActualIdx = lastAssistantIdx !== -1 ? messages.length - 1 - lastAssistantIdx : -1;
 
   return (
-    <div className="flex-1 flex overflow-hidden h-full relative no-zoom">
+    <div className="flex-1 flex overflow-hidden h-full relative no-zoom" style={{ height: viewportHeight }}>
 
       {/* ── Main Chat Column ── */}
       <div className="flex-1 flex flex-col h-full min-w-0 bg-background">
@@ -332,8 +363,10 @@ export default function CopilotPage() {
                 setKeywordResults([]);
                 setKeywordTime(null);
               }}
+              disabled={loading}
               className={`inline-flex items-center gap-1.5 text-[10px] font-display font-semibold uppercase tracking-wider
                           border rounded-lg px-3 py-1.5 transition-all duration-150 min-h-[32px] tap-target
+                          disabled:opacity-50 disabled:cursor-not-allowed
                           ${compareMode
                             ? "border-primary/40 bg-primary/10 text-primary"
                             : "border-border bg-transparent text-muted-foreground hover:text-foreground hover:bg-accent"
@@ -347,6 +380,7 @@ export default function CopilotPage() {
               <Button
                 variant="ghost"
                 size="sm"
+                disabled={loading}
                 onClick={() => {
                   clearChat();
                   setKeywordResults([]);
@@ -367,7 +401,7 @@ export default function CopilotPage() {
         </div>
 
         {/* ── Conversation Area ── */}
-        <div className="flex-1 min-h-0 overflow-y-auto scroll-touch px-4 md:px-6 py-5 space-y-4">
+        <div ref={chatContainerRef} className="flex-1 min-h-0 overflow-y-auto scroll-touch px-4 md:px-6 py-5 space-y-4">
 
           {/* Empty State */}
           {!hasMessages && !compareMode && (
@@ -615,7 +649,7 @@ export default function CopilotPage() {
         </div>
 
         {/* ── Input Composer ── */}
-        <div className="shrink-0 border-t border-border bg-card/60 backdrop-blur-sm p-3 md:p-4">
+        <div className="shrink-0 border-t border-border bg-card/60 backdrop-blur-sm p-3 pb-[calc(12px+56px+env(safe-area-inset-bottom,0px))] md:p-4">
           <form onSubmit={handleSubmit} className="flex gap-2.5 max-w-3xl">
             <div className="flex-1 relative">
               <input
@@ -699,7 +733,7 @@ export default function CopilotPage() {
       {/* ── Citation Detail Modal ── */}
       {activeCitation && (
         <div className="absolute inset-0 bg-slate-950/75 z-50 flex items-end md:items-center justify-center p-0 md:p-6">
-          <div className="w-full md:max-w-lg bg-card border border-border rounded-2xl md:rounded-xl shadow-[var(--shadow-elevated)] space-y-4 p-5 md:p-6">
+          <div className="w-full md:max-w-lg bg-card border border-border rounded-2xl md:rounded-xl shadow-[var(--shadow-elevated)] space-y-4 p-5 pb-[calc(20px+56px+env(safe-area-inset-bottom,0px))] md:p-6">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <div className="p-1.5 rounded-lg bg-primary/10">

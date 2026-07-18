@@ -25,15 +25,41 @@ class IngestionStatusResponse(BaseModel):
     error: Optional[str] = None
 
 
+class IngestionJobResponse(IngestionStatusResponse):
+    created_at: Optional[int] = None
+    updated_at: Optional[int] = None
+
+
+class IngestionJobsResponse(BaseModel):
+    jobs: List[IngestionJobResponse] = Field(default_factory=list)
+
+
+class StatsOverviewResponse(BaseModel):
+    document_count: int = 0
+    entity_count: int = 0
+    chunk_count: int = 0
+    failure_count: int = 0
+    active_ingestion_jobs: int = 0
+    completed_ingestion_jobs: int = 0
+    failed_ingestion_jobs: int = 0
+    database_connected: bool = False
+    vector_index_state: Optional[str] = None
+    recent_jobs: List[IngestionJobResponse] = Field(default_factory=list)
+
+
 # Copilot / Chat Models
 class ChatMessage(BaseModel):
-    role: str = Field(..., description="Role of the sender, e.g., 'user' or 'assistant'")
+    role: str = Field(
+        ..., description="Role of the sender, e.g., 'user' or 'assistant'"
+    )
     content: str = Field(..., description="Text content of the message")
 
 
 class ChatRequest(BaseModel):
     query: str = Field(..., description="The query string to evaluate")
-    history: List[ChatMessage] = Field(default=[], description="Previous conversation context")
+    history: List[ChatMessage] = Field(
+        default=[], description="Previous conversation context"
+    )
 
 
 class RAGContext(BaseModel):
@@ -49,7 +75,9 @@ class ChatResponse(BaseModel):
 # Copilot SSE Models
 class CopilotChatRequest(BaseModel):
     query: str = Field(..., description="The user query text")
-    conversation_id: Optional[str] = Field(None, description="Optional ID for multi-turn session tracking")
+    conversation_id: Optional[str] = Field(
+        None, description="Optional ID for multi-turn session tracking"
+    )
 
 
 class Citation(BaseModel):
@@ -60,8 +88,12 @@ class Citation(BaseModel):
 
 class CopilotChatResponse(BaseModel):
     answer: str = Field(..., description="The synthesized answer from the agent")
-    citations: List[Citation] = Field(default_factory=list, description="List of cited source documents")
-    confidence: Literal["high", "medium", "low"] = Field("medium", description="Confidence scoring evaluation")
+    citations: List[Citation] = Field(
+        default_factory=list, description="List of cited source documents"
+    )
+    confidence: Literal["high", "medium", "low"] = Field(
+        "medium", description="Confidence scoring evaluation"
+    )
     conversation_id: str = Field(..., description="The session tracking ID")
 
 
@@ -83,3 +115,6 @@ class EdgeSchema(BaseModel):
 class GraphResponse(BaseModel):
     nodes: List[NodeSchema]
     edges: List[EdgeSchema]
+    center_node_id: Optional[str] = None
+    matched_nodes_count: Optional[int] = None
+    all_matched_nodes: Optional[List[Dict[str, Any]]] = None

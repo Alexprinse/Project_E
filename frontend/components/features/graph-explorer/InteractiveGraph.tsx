@@ -21,7 +21,10 @@ import { NodeSchema, EdgeSchema, GraphResponse } from "@/lib/api";
 
 interface InteractiveGraphProps {
   graphData: GraphResponse;
-  searchTag: string;
+  /** The backend-resolved center node id (GraphResponse.center_node_id) - NOT the raw search
+   * input, since the backend may resolve a search fuzzily (partial match, normalized tag) to a
+   * node whose id/tag/name differs from what the user typed. */
+  centerNodeId: string | null | undefined;
   selectedNode: NodeSchema | null;
   onNodeClick: (node: NodeSchema) => void;
   onCloseInspector: () => void;
@@ -29,6 +32,7 @@ interface InteractiveGraphProps {
 
 const COLOR_MAP = {
   document: { fill: "rgba(74, 144, 164, 0.15)", border: "#4A90A4", label: "Document", color: "#4A90A4" },
+  chunk: { fill: "rgba(74, 144, 164, 0.15)", border: "#4A90A4", label: "Text Chunk (Optional)", color: "#4A90A4" },
   location: { fill: "rgba(74, 156, 130, 0.15)", border: "#4A9C82", label: "Location", color: "#4A9C82" },
   processparameter: { fill: "rgba(217, 142, 51, 0.15)", border: "#D98E33", label: "Parameter", color: "#D98E33" },
   failure: { fill: "rgba(248, 81, 73, 0.15)", border: "#F85149", label: "Failure", color: "#F85149" },
@@ -37,7 +41,8 @@ const COLOR_MAP = {
 
 function getNodeMeta(labels: string[]) {
   const primaryLabel = labels[0]?.toLowerCase() || "";
-  if (primaryLabel.includes("document") || primaryLabel.includes("chunk")) return COLOR_MAP.document;
+  if (primaryLabel.includes("chunk")) return COLOR_MAP.chunk;
+  if (primaryLabel.includes("document")) return COLOR_MAP.document;
   if (primaryLabel.includes("location")) return COLOR_MAP.location;
   if (primaryLabel.includes("processparameter")) return COLOR_MAP.processparameter;
   if (primaryLabel.includes("failure")) return COLOR_MAP.failure;
@@ -46,7 +51,7 @@ function getNodeMeta(labels: string[]) {
 
 export default function InteractiveGraph({
   graphData,
-  searchTag,
+  centerNodeId,
   selectedNode,
   onNodeClick,
   onCloseInspector,
@@ -61,7 +66,8 @@ export default function InteractiveGraph({
   const [particleSpeed, setParticleSpeed] = useState(3);
 
   // Filter states
-  const [excludedTypes, setExcludedTypes] = useState<Record<string, boolean>>({});
+  const [excludedTypes, setExcludedTypes] = useState<Record<string, boolean>>({ Chunk: true });
+  const [hideIsolated, setHideIsolated] = useState(true);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const graph2DInstanceRef = useRef<any>(null);
@@ -93,7 +99,7 @@ export default function InteractiveGraph({
   // Create clean clones of nodes and edges to prevent react-force-graph mutations
   const cleanData = useMemo(() => {
     const types = new Set<string>();
-    const nodes = graphData.nodes
+    const typeFilteredNodes = graphData.nodes
       .map((n) => {
         const typeLabel = n.labels[0] || "Unknown";
         types.add(typeLabel);
@@ -105,7 +111,9 @@ export default function InteractiveGraph({
       })
       .filter((n) => !excludedTypes[n.labels[0] || "Unknown"]);
 
-    const nodeIds = new Set(nodes.map((n) => n.id));
+    const typeFilteredIds = new Set(typeFilteredNodes.map((n) => n.id));
+
+    // Build link list constrained to type-filtered nodes
     const links = graphData.edges
       .map((e) => ({
         id: e.id,
@@ -114,10 +122,22 @@ export default function InteractiveGraph({
         type: e.type,
         properties: { ...e.properties },
       }))
-      .filter((l) => nodeIds.has(l.source) && nodeIds.has(l.target));
+      .filter((l) => typeFilteredIds.has(l.source) && typeFilteredIds.has(l.target));
+
+    // Build set of nodes that appear in at least one edge (after type filter)
+    const connectedIds = new Set<string>();
+    links.forEach((l) => {
+      connectedIds.add(typeof l.source === "object" ? (l.source as any).id : l.source);
+      connectedIds.add(typeof l.target === "object" ? (l.target as any).id : l.target);
+    });
+
+    // Optionally strip nodes with zero edges in this subgraph view
+    const nodes = hideIsolated
+      ? typeFilteredNodes.filter((n) => connectedIds.has(n.id))
+      : typeFilteredNodes;
 
     return { nodes, links, allTypes: Array.from(types) };
-  }, [graphData, excludedTypes]);
+  }, [graphData, excludedTypes, hideIsolated]);
 
   // Toggle fullscreen
   const toggleFullscreen = () => {
@@ -161,19 +181,22 @@ export default function InteractiveGraph({
     }
   };
 
-  // Focus node on search tag / selection changes
+  // Focus node on selection changes / when the backend resolves a new center node
   useEffect(() => {
     if (selectedNode) {
       const match = cleanData.nodes.find((n) => n.id === selectedNode.id);
       if (match) setTimeout(() => focusNode(match), 200);
-    } else if (searchTag) {
+    } else if (centerNodeId) {
+      // Match against the backend's resolved center_node_id (exact, case-insensitive) rather
+      // than the raw search input - the backend may resolve a fuzzy/partial search to a node
+      // whose id differs from what the user typed.
       const match = cleanData.nodes.find(
-        (n) => n.id.toLowerCase() === searchTag.toLowerCase() || n.properties.tag === searchTag
+        (n) => n.id.toLowerCase() === centerNodeId.toLowerCase()
       );
       if (match) setTimeout(() => focusNode(match), 200);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedNode, searchTag]);
+  }, [selectedNode, centerNodeId]);
 
   // Adjust force simulation on settings changes and layout initialization
   useEffect(() => {
@@ -189,7 +212,7 @@ export default function InteractiveGraph({
         "collide",
         forceCollide()
           .radius((node: any) => {
-            const label = node.properties.tag || node.id;
+            const label = node.properties.display_name || node.properties.name || node.properties.tag || node.id;
             const textWidth = label.length * 6;
             const boxWidth = Math.max(90, textWidth + 30);
             return boxWidth / 2 + 12; // Radius of boundary + buffer spacing
@@ -238,7 +261,40 @@ export default function InteractiveGraph({
         </div>
 
         {/* Action Controls Group */}
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setExcludedTypes((prev) => ({ ...prev, Chunk: !prev.Chunk }));
+            }}
+            className={`text-[10px] font-mono h-7 px-2.5 flex items-center gap-1.5 rounded-lg border transition-all ${
+              !excludedTypes.Chunk
+                ? "bg-primary/10 border-primary/30 text-primary"
+                : "border-border text-muted-foreground hover:text-foreground bg-transparent"
+            }`}
+            title={!excludedTypes.Chunk ? "Hide Document Text Chunks" : "Show Document Text Chunks"}
+          >
+            <span className={`h-1.5 w-1.5 rounded-full ${!excludedTypes.Chunk ? "bg-primary animate-pulse" : "bg-muted-foreground"}`} />
+            <span>{!excludedTypes.Chunk ? "Chunks Shown" : "Chunks Hidden"}</span>
+          </Button>
+
+          {/* Isolated nodes toggle */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setHideIsolated((prev) => !prev)}
+            className={`text-[10px] font-mono h-7 px-2.5 flex items-center gap-1.5 rounded-lg border transition-all ${
+              hideIsolated
+                ? "border-border text-muted-foreground hover:text-foreground bg-transparent"
+                : "bg-amber-500/10 border-amber-500/30 text-amber-400"
+            }`}
+            title={hideIsolated ? "Show isolated (unconnected) nodes" : "Hide isolated (unconnected) nodes"}
+          >
+            <span className={`h-1.5 w-1.5 rounded-full ${hideIsolated ? "bg-muted-foreground" : "bg-amber-500 animate-pulse"}`} />
+            <span>{hideIsolated ? "Isolated Hidden" : "Isolated Shown"}</span>
+          </Button>
+
           <Button variant="ghost" size="icon-sm" onClick={fitGraph} title="Fit Graph View">
             <Layers className="h-3.5 w-3.5" />
           </Button>
@@ -409,10 +465,10 @@ export default function InteractiveGraph({
           linkDirectionalParticleSpeed={(link: any) => particleSpeed * 0.003}
           nodeCanvasObject={(node: any, ctx, globalScale) => {
             const isSelected = selectedNode?.id === node.id;
-            const isCenter = searchTag && (node.id.toLowerCase() === searchTag.toLowerCase() || node.properties.tag === searchTag);
+            const isCenter = !!centerNodeId && node.id.toLowerCase() === centerNodeId.toLowerCase();
             const meta = getNodeMeta(node.labels);
 
-            const label = node.properties.tag || node.id;
+            const label = node.properties.display_name || node.properties.name || node.properties.tag || node.id;
             const subLabel = node.labels[0] || "Unknown";
 
             // Dynamic box width depending on label length
@@ -480,6 +536,20 @@ export default function InteractiveGraph({
               ctx.fillStyle = "rgba(138, 148, 160, 0.75)";
               ctx.fillText(subLabel.toUpperCase(), node.x, y + boxHeight + 3);
             }
+          }}
+          nodePointerAreaPaint={(node: any, color, ctx) => {
+            const label = node.properties.display_name || node.properties.name || node.properties.tag || node.id;
+            const fontSize = 10;
+            ctx.font = `bold ${fontSize}px var(--font-mono), monospace`;
+            const textWidth = ctx.measureText(label).width;
+            const boxWidth = Math.max(90, textWidth + 30);
+            const boxHeight = 24;
+
+            const x = node.x - boxWidth / 2;
+            const y = node.y - boxHeight / 2;
+
+            ctx.fillStyle = color;
+            ctx.fillRect(x, y, boxWidth, boxHeight);
           }}
         />
       </div>

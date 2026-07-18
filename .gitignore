@@ -84,3 +84,5 @@ VERIFICATION_REPORT.md
 *.sw?
 .DS_Store
 Thumbs.db
+
+.agents

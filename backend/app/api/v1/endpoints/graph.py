@@ -18,5 +18,8 @@ def get_graph_explorer(
     
     return GraphResponse(
         nodes=subgraph_data["nodes"],
-        edges=subgraph_data["edges"]
+        edges=subgraph_data["edges"],
+        center_node_id=subgraph_data.get("center_node_id"),
+        matched_nodes_count=subgraph_data.get("matched_nodes_count"),
+        all_matched_nodes=subgraph_data.get("all_matched_nodes")
     )

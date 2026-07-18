@@ -11,6 +11,7 @@ CREATE CONSTRAINT procedure_id_unique IF NOT EXISTS FOR (p:Procedure) REQUIRE p.
 CREATE CONSTRAINT regulation_code_unique IF NOT EXISTS FOR (r:Regulation) REQUIRE r.code IS UNIQUE;
 CREATE CONSTRAINT nonconformance_id_unique IF NOT EXISTS FOR (n:NonConformance) REQUIRE n.id IS UNIQUE;
 CREATE CONSTRAINT chunk_id_unique IF NOT EXISTS FOR (c:Chunk) REQUIRE c.id IS UNIQUE;
+CREATE CONSTRAINT ingestionjob_id_unique IF NOT EXISTS FOR (j:IngestionJob) REQUIRE j.id IS UNIQUE;
 
 // Vector Index on Document Chunk Embeddings (Voyage-3 default 1024 dimensions)
 CREATE VECTOR INDEX chunk_embeddings IF NOT EXISTS

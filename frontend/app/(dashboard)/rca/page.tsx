@@ -50,21 +50,33 @@ function parseRcaReport(text: string, isAnalyzing: boolean): RcaSections {
 
   const lines = text.split("\n");
   let currentSection: keyof RcaSections | null = null;
+  let matchedAnyHeader = false;
 
   for (const line of lines) {
     const lowerLine = line.toLowerCase().trim();
     if (lowerLine.startsWith("### root cause") || lowerLine === "root cause:") {
-      currentSection = "rootCause"; continue;
+      currentSection = "rootCause"; matchedAnyHeader = true; continue;
     } else if (lowerLine.startsWith("### contributing factors") || lowerLine === "contributing factors:") {
-      currentSection = "contributingFactors"; continue;
+      currentSection = "contributingFactors"; matchedAnyHeader = true; continue;
     } else if (lowerLine.startsWith("### affected equipment") || lowerLine === "affected equipment:") {
-      currentSection = "affectedEquipment"; continue;
+      currentSection = "affectedEquipment"; matchedAnyHeader = true; continue;
     } else if (lowerLine.startsWith("### related regulations") || lowerLine === "related regulations:") {
-      currentSection = "relatedRegulations"; continue;
+      currentSection = "relatedRegulations"; matchedAnyHeader = true; continue;
     } else if (lowerLine.startsWith("### recommended action") || lowerLine === "recommended action:") {
-      currentSection = "recommendedAction"; continue;
+      currentSection = "recommendedAction"; matchedAnyHeader = true; continue;
     }
     if (currentSection) sections[currentSection] += line + "\n";
+  }
+
+  // The model is free-form text generation with no structured-output enforcement - if its
+  // output ever drifts from the expected "### Header" format, don't silently show 5 empty
+  // "No data" sections for content it actually produced; surface the raw text instead.
+  if (!matchedAnyHeader && !isAnalyzing) {
+    sections.rootCause = text.trim();
+    sections.contributingFactors = "";
+    sections.affectedEquipment = "";
+    sections.relatedRegulations = "";
+    sections.recommendedAction = "";
   }
 
   for (const k of Object.keys(sections) as Array<keyof RcaSections>) {
@@ -97,7 +109,10 @@ function parseLineWithCitations(line: string, citations: Citation[]): React.Reac
           segments.push(", ");
         }
 
-        const citation = citations.find(c => c.document_id.toLowerCase() === docId.toLowerCase());
+        const cleanDocId = docId.toLowerCase().startsWith("doc-")
+          ? docId.substring(4)
+          : docId;
+        const citation = citations.find(c => c.document_id.toLowerCase() === cleanDocId.toLowerCase());
         if (citation) {
           segments.push(
             <span
@@ -368,7 +383,7 @@ export default function RcaPage() {
         </div>
 
         {/* Board content */}
-        <div className="flex-1 overflow-y-auto scroll-touch p-4 md:p-6 space-y-4">
+        <div className="flex-1 overflow-y-auto scroll-touch p-4 pb-[calc(16px+56px+env(safe-area-inset-bottom,0px))] md:p-6 space-y-4">
 
           {/* Error */}
           {error && (
@@ -468,7 +483,7 @@ export default function RcaPage() {
       {/* ── Citation Detail Modal ── */}
       {activeCitation && (
         <div className="absolute inset-0 bg-slate-950/75 z-50 flex items-end md:items-center justify-center p-0 md:p-6">
-          <div className="w-full md:max-w-lg bg-card border border-border rounded-t-2xl md:rounded-xl shadow-[var(--shadow-elevated)] p-5 md:p-6 space-y-4">
+          <div className="w-full md:max-w-lg bg-card border border-border rounded-t-2xl md:rounded-xl shadow-[var(--shadow-elevated)] p-5 pb-[calc(20px+56px+env(safe-area-inset-bottom,0px))] md:p-6 space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <div className="p-1.5 rounded-lg bg-primary/10">

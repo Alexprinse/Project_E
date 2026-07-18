@@ -13,7 +13,7 @@ class VectorRepository(BaseRepository):
         index_name: str,
         label: str,
         property_name: str,
-        dimensions: int = 1536,
+        dimensions: int = 1024,
         similarity_fn: str = "cosine"
     ) -> None:
         """Creates a vector search index on a specific node label and property."""
@@ -23,7 +23,7 @@ class VectorRepository(BaseRepository):
         OPTIONS {{
             indexConfig: {{
                 `vector.dimensions`: $dimensions,
-                `vector.similarity-function`: $similarity_fn
+                `vector.similarity_function`: $similarity_fn
             }}
         }}
         """

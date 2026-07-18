@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { env } from "@/lib/env";
 import { api, Citation, FailureNode } from "@/lib/api";
 
@@ -12,6 +12,18 @@ export function useStreamingRca() {
   const [confidence, setConfidence] = useState<"high" | "medium" | "low" | null>(null);
   const [executionTime, setExecutionTime] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Tracks the most recently started analysis so a superseded stream's late-arriving
+  // events can be ignored instead of overwriting a newer analysis's state.
+  const activeRequestId = useRef(0);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Cancel any in-flight stream on unmount so it can't call state setters after teardown.
+  useEffect(() => {
+    return () => {
+      abortControllerRef.current?.abort();
+    };
+  }, []);
 
   const fetchFailures = useCallback(async () => {
     setLoadingFailures(true);
@@ -30,6 +42,15 @@ export function useStreamingRca() {
   const runAnalysis = useCallback(async (failureId: string) => {
     if (!failureId) return;
 
+    // Supersede any previous in-flight analysis: abort its request and bump the
+    // request id so its late-arriving events are ignored rather than corrupting
+    // this new call's state.
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    const requestId = ++activeRequestId.current;
+    const isStale = () => activeRequestId.current !== requestId;
+
     setLoadingAnalysis(true);
     setStatus("Initiating analysis...");
     setRcaReport("");
@@ -46,6 +67,7 @@ export function useStreamingRca() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ failure_id: failureId }),
+        signal: controller.signal,
       });
 
       if (!response.ok) {
@@ -64,6 +86,7 @@ export function useStreamingRca() {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+        if (isStale()) break;
 
         buffer += decoder.decode(value, { stream: true });
         const parts = buffer.split(/\r?\n\r?\n/);
@@ -85,6 +108,7 @@ export function useStreamingRca() {
           }
 
           if (!eventData) continue;
+          if (isStale()) continue;
 
           try {
             const data = JSON.parse(eventData);
@@ -109,11 +133,19 @@ export function useStreamingRca() {
         }
       }
     } catch (e) {
+      if ((e as Error).name === "AbortError") {
+        // Superseded or unmounted - not a real error, nothing to surface.
+        return;
+      }
       console.error("RCA stream error", e);
-      setError((e as Error).message || "Plant terminal network error.");
-      setStatus("");
+      if (!isStale()) {
+        setError((e as Error).message || "Plant terminal network error.");
+        setStatus("");
+      }
     } finally {
-      setLoadingAnalysis(false);
+      if (!isStale()) {
+        setLoadingAnalysis(false);
+      }
     }
   }, []);
 

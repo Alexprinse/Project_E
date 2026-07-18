@@ -34,12 +34,21 @@ function NodeDetail({
   node,
   inEdges,
   outEdges,
+  nodes = [],
 }: {
   node: NodeSchema;
   inEdges: EdgeSchema[];
   outEdges: EdgeSchema[];
+  nodes?: NodeSchema[];
 }) {
   const dot = getNodeColor(node.labels);
+  const getNodeName = (id: string) => {
+    const found = nodes.find((n) => n.id === id);
+    if (found) {
+      return found.properties.display_name || found.properties.name || found.properties.tag || found.id;
+    }
+    return id;
+  };
   return (
     <div className="space-y-5 p-5">
       {/* Identity */}
@@ -49,9 +58,9 @@ function NodeDetail({
           <Badge variant="info" className="text-[9px]">{node.labels[0]}</Badge>
         </div>
         <h3 className="font-mono font-bold text-sm text-foreground break-all">
-          {node.properties.tag || node.id}
+          {node.properties.display_name || node.properties.tag || node.id}
         </h3>
-        {node.properties.tag && (
+        {(node.properties.tag || node.properties.display_name) && (
           <p className="text-[10px] font-mono text-muted-foreground mt-0.5 break-all">{node.id}</p>
         )}
       </div>
@@ -78,13 +87,13 @@ function NodeDetail({
           {outEdges.map((edge) => (
             <div key={edge.id} className="flex items-center gap-2 p-2 rounded-md border border-border bg-muted/5 text-[9px] font-mono">
               <span className="text-primary font-bold shrink-0">→ {edge.type}</span>
-              <span className="text-muted-foreground truncate">{edge.target}</span>
+              <span className="text-muted-foreground truncate">{getNodeName(edge.target)}</span>
             </div>
           ))}
           {inEdges.map((edge) => (
             <div key={edge.id} className="flex items-center gap-2 p-2 rounded-md border border-border bg-muted/5 text-[9px] font-mono">
               <span className="text-teal-success font-bold shrink-0">← {edge.type}</span>
-              <span className="text-muted-foreground truncate">{edge.source}</span>
+              <span className="text-muted-foreground truncate">{getNodeName(edge.source)}</span>
             </div>
           ))}
           {inEdges.length === 0 && outEdges.length === 0 && (
@@ -100,6 +109,7 @@ export default function GraphExplorerPage() {
   const [searchTag, setSearchTag] = useState("P-101");
   const [loading, setLoading] = useState(false);
   const [graphData, setGraphData] = useState<GraphResponse | null>(null);
+  const [searchError, setSearchError] = useState<string | null>(null);
 
   const [selectedNode, setSelectedNode] = useState<NodeSchema | null>(null);
   const [incomingEdges, setIncomingEdges] = useState<EdgeSchema[]>([]);
@@ -116,12 +126,17 @@ export default function GraphExplorerPage() {
     setLoading(true);
     setSelectedNode(null);
     setShowNodeSheet(false);
+    setSearchError(null);
     try {
       const data = await api.getGraphExplorer(tagToSearch);
       setGraphData(data);
-    } catch {
-      const mockData = generateMockGraph(tagToSearch);
-      setGraphData(mockData);
+    } catch (e) {
+      console.error("Graph explorer search failed", e);
+      // Surface the failure instead of silently rendering fabricated placeholder data -
+      // showing mock nodes here would look like a real (but wrong) knowledge graph result.
+      setSearchError(
+        "Could not reach the graph database. The backend may be unreachable or the query failed."
+      );
     } finally {
       setLoading(false);
     }
@@ -186,12 +201,70 @@ export default function GraphExplorerPage() {
           </div>
         </div>
 
+        {/* Multiple Matches Banner */}
+        {!!graphData?.matched_nodes_count && graphData.matched_nodes_count > 1 && (
+          <div className="shrink-0 px-4 md:px-6 py-2.5 bg-primary/5 border-b border-border text-[10px] font-mono flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="text-primary font-bold">Multiple matches ({graphData.matched_nodes_count}):</span>
+            <span className="text-muted-foreground">Showing</span>
+            <span className="px-1.5 py-0.5 rounded bg-muted/50 border border-border text-foreground font-semibold">
+              {graphData.center_node_id}
+            </span>
+            <span className="text-muted-foreground/60">| Jump to:</span>
+            <div className="flex gap-2.5 items-center overflow-x-auto max-w-full no-scrollbar">
+              {graphData.all_matched_nodes
+                ?.filter((m) => m.id !== graphData.center_node_id)
+                .slice(0, 4)
+                .map((match, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => {
+                      setSearchTag(match.id);
+                      handleSearch(match.id);
+                    }}
+                    className="text-primary hover:underline hover:text-primary/80 transition-colors shrink-0 font-medium cursor-pointer"
+                  >
+                    {match.display_name} ({match.labels[0]})
+                  </button>
+                ))}
+              {graphData.all_matched_nodes && graphData.all_matched_nodes.length > 5 && (
+                <span className="text-muted-foreground/50 shrink-0">
+                  ...and {graphData.all_matched_nodes.length - 5} more
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Empty Matches Banner */}
+        {graphData?.matched_nodes_count === 0 && (
+          <div className="shrink-0 px-4 md:px-6 py-2.5 bg-amber-500/5 border-b border-border text-[10px] font-mono text-amber-500 flex items-center gap-1.5 animate-fade-in">
+            <span className="h-1.5 w-1.5 rounded-full bg-amber-500 shrink-0 animate-pulse" />
+            <span>No matches found in the graph database for &ldquo;{searchTag}&rdquo;</span>
+          </div>
+        )}
+
+        {/* Search Error Banner */}
+        {searchError && (
+          <div className="shrink-0 px-4 md:px-6 py-2.5 bg-red-500/5 border-b border-border text-[10px] font-mono text-red-500 flex items-center gap-1.5 animate-fade-in">
+            <span className="h-1.5 w-1.5 rounded-full bg-red-500 shrink-0 animate-pulse" />
+            <span>{searchError}</span>
+          </div>
+        )}
+
         {/* Graph canvas */}
         <div className="flex-1 relative overflow-hidden bg-[#0A0E13]">
           {loading ? (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 z-10 bg-[#080C0F]">
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
               <span className="text-xs font-mono text-muted-foreground font-semibold">Routing graph channels...</span>
+            </div>
+          ) : searchError && !graphData ? (
+            <div className="absolute inset-0 flex items-center justify-center bg-[#080C0F]">
+              <EmptyState
+                icon={Network}
+                title="Graph query failed"
+                description={searchError}
+              />
             </div>
           ) : !graphData ? (
             <div className="absolute inset-0 flex items-center justify-center bg-[#080C0F]">
@@ -204,7 +277,7 @@ export default function GraphExplorerPage() {
           ) : (
             <InteractiveGraph
               graphData={graphData}
-              searchTag={searchTag}
+              centerNodeId={graphData.center_node_id}
               selectedNode={selectedNode}
               onNodeClick={handleNodeClick}
               onCloseInspector={closeNodeDetail}
@@ -233,7 +306,7 @@ export default function GraphExplorerPage() {
             </button>
           </div>
           <div className="flex-1 overflow-y-auto scroll-touch">
-            <NodeDetail node={selectedNode} inEdges={incomingEdges} outEdges={outgoingEdges} />
+            <NodeDetail node={selectedNode} inEdges={incomingEdges} outEdges={outgoingEdges} nodes={graphData?.nodes || []} />
           </div>
           <div className="border-t border-border p-4">
             <Button variant="outline" size="sm" className="w-full" onClick={closeNodeDetail}>
@@ -247,14 +320,14 @@ export default function GraphExplorerPage() {
       <BottomSheet
         open={showNodeSheet}
         onClose={closeNodeDetail}
-        title={selectedNode?.properties.tag || selectedNode?.id.slice(0, 16) || "Entity"}
+        title={selectedNode?.properties.display_name || selectedNode?.properties.tag || selectedNode?.id || "Entity"}
         maxHeight="68vh"
         bottomOffset="calc(4.5rem + env(safe-area-inset-bottom, 0px))"
         className="lg:hidden"
       >
         {selectedNode && (
           <>
-            <NodeDetail node={selectedNode} inEdges={incomingEdges} outEdges={outgoingEdges} />
+            <NodeDetail node={selectedNode} inEdges={incomingEdges} outEdges={outgoingEdges} nodes={graphData?.nodes || []} />
             <div className="border-t border-border p-4">
               <Button variant="outline" size="sm" className="w-full min-h-[44px]" onClick={closeNodeDetail}>
                 Close Inspector
@@ -266,17 +339,3 @@ export default function GraphExplorerPage() {
     </div>
   );
 }
-
-const generateMockGraph = (tag: string): GraphResponse => ({
-  nodes: [
-    { id: tag, labels: ["Equipment"], properties: { tag, type: "Centrifugal Pump", location: "Unit 3", criticality: "High" } },
-    { id: "LOC-UNIT3", labels: ["Location"], properties: { name: "Unit 3", unit: "Refinery-A" } },
-    { id: "DOC-TEST-01", labels: ["Document"], properties: { name: "Operating Manual M-12", version: "1.0" } },
-    { id: "PP-DISCHARGE", labels: ["ProcessParameter"], properties: { name: "Discharge Pressure", normal_min: 400, normal_max: 500 } },
-  ],
-  edges: [
-    { id: "E1", type: "OCCURRED_ON", source: tag, target: "LOC-UNIT3", properties: {} },
-    { id: "E2", type: "HAS_DOCUMENT", source: "DOC-TEST-01", target: tag, properties: {} },
-    { id: "E3", type: "HAS_PARAMETER", source: tag, target: "PP-DISCHARGE", properties: {} },
-  ],
-});

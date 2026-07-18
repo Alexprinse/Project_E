@@ -72,7 +72,7 @@ export function BottomSheet({
         )}
 
         {/* Content */}
-        <div className="flex-1 min-h-0 overflow-y-auto scroll-touch">
+        <div className="flex-1 min-h-0 overflow-y-auto scroll-touch pb-[calc(16px+56px+env(safe-area-inset-bottom,0px))] md:pb-6">
           {children}
         </div>
       </div>
