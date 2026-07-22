@@ -54,10 +54,12 @@ class RAGService:
                 "Analyze the user query. Classify it into one of these types:\n"
                 "1. 'entity-specific': The query references a specific equipment tag (e.g., P-101, V-202), "
                 "instrument, location name, or procedure document ID.\n"
-                "2. 'general': A general operational question about engineering, rules, or manual procedures.\n"
-                "3. 'out-of-scope': Anything unrelated to plant engineering, safety, operation, or maintenance.\n\n"
-                "Extract any matched tag names or entity names under 'entities' list.\n"
-                "Return JSON matching: { 'type': 'entity-specific' | 'general' | 'out-of-scope', 'entities': string[] }"
+                "2. 'structured-filter': The query asks to list, find, or filter items based on structured properties (e.g., 'all equipment with High criticality', 'pumps in Unit 1').\n"
+                "3. 'general': A general operational question about engineering, rules, or manual procedures.\n"
+                "4. 'out-of-scope': Anything unrelated to plant engineering, safety, operation, or maintenance.\n\n"
+                "If type is 'entity-specific', extract any matched tag names or entity names under 'entities' list.\n"
+                "If type is 'structured-filter', extract the filter condition as a dict under 'filters' (e.g. {'criticality': 'High'}, {'type': 'Pump'}, {'location': 'Unit 1'}). Only use keys: criticality, type, location, install_date.\n"
+                "Return JSON matching: { 'type': 'entity-specific' | 'structured-filter' | 'general' | 'out-of-scope', 'entities': string[], 'filters': dict }"
             )
             
             response = await client.aio.models.generate_content(
@@ -81,7 +83,7 @@ class RAGService:
             logger.warning("Gemini Flash query classification failed, falling back to 'general'", error=str(e))
             return {"type": "general", "entities": []}
 
-    async def retrieve_hybrid_context(self, query: str, limit: int = 3) -> Dict[str, Any]:
+    async def retrieve_hybrid_context(self, query: str, limit: int = 15) -> Dict[str, Any]:
         """Retrieves context by running parallel vector similarity searches and relationship graph traversals.
 
         Scores and fuses result sets, prioritizing direct database relations.
@@ -90,6 +92,7 @@ class RAGService:
         classification = await self.classify_query(query)
         query_type = classification.get("type", "general")
         entities = classification.get("entities", [])
+        filters = classification.get("filters", {})
 
         # 2. Embed query text using Voyage AI
         embed_service = EmbeddingService()
@@ -138,37 +141,67 @@ class RAGService:
                 """
                 res = self.session.run(graph_query, entities=entities, entities_normalized=entities_normalized)
                 for record in res:
-                    e_props = dict(record["e"])
-                    m_props = dict(record["m"])
-                    r_type = record["r"].type
+                    e_node = record["e"]
+                    m_node = record["m"]
+                    rel = record["r"]
+                    rel_type = rel.type if rel else "UNKNOWN"
+                    e_label = list(e_node.labels)[0] if e_node.labels else "Unknown"
+                    m_label = list(m_node.labels)[0] if m_node.labels else "Unknown"
                     
-                    e_label = list(record["e"].labels)[0] if record["e"].labels else "Entity"
-                    m_label = list(record["m"].labels)[0] if record["m"].labels else "Entity"
+                    e_name = e_node.get("tag") or e_node.get("name") or e_node.get("id") or "Unknown"
+                    m_name = m_node.get("tag") or m_node.get("name") or m_node.get("id") or "Unknown"
                     
-                    # Log structured graph fact string
-                    src_val = e_props.get("tag") or e_props.get("name")
-                    tgt_val = m_props.get("tag") or m_props.get("name") or m_props.get("id")
-                    fact_str = f"({e_label}: {src_val}) -[{r_type}]-> ({m_label}: {tgt_val})"
-                    graph_facts.append(fact_str)
-
-                    # Extract context document if linked
-                    doc_id = record["doc_id"]
-                    doc_name = record["doc_name"]
-                    chunk_text = record["chunk_text"]
-                    chunk_id = record["chunk_id"]
+                    fact = f"[{e_label}] {e_name} --({rel_type})--> [{m_label}] {m_name}"
+                    graph_facts.append(fact)
                     
-                    if doc_id and doc_name and chunk_text:
+                    if record["chunk_text"]:
                         graph_results.append({
-                            "doc_id": doc_id,
-                            "doc_name": doc_name,
-                            "text": chunk_text,
-                            "chunk_id": chunk_id,
-                            # Boost direct graph relationships to maximum relevance
-                            "score": 1.0, 
+                            "doc_id": record["doc_id"],
+                            "doc_name": record["doc_name"],
+                            "text": record["chunk_text"],
+                            "chunk_id": record["chunk_id"],
+                            "score": 1.0,  # Exact graph matches bypass score filtering
                             "source": "graph"
                         })
             except Exception as e:
                 logger.error("Graph traversal execution failed", error=str(e))
+                
+        if query_type == "structured-filter" and filters:
+            logger.info("Executing structured Cypher filter", filters=filters)
+            try:
+                where_clauses = []
+                params = {}
+                for k, v in filters.items():
+                    where_clauses.append(f"toLower(e.{k}) CONTAINS toLower(${k})")
+                    params[k] = v
+                    
+                where_string = " AND ".join(where_clauses) if where_clauses else "1=1"
+                
+                graph_query = f"""
+                MATCH (e:Equipment)
+                WHERE {where_string}
+                OPTIONAL MATCH (e)-[:HAS_DOCUMENT]->(d:Document)-[:HAS_CHUNK]->(c:Chunk)
+                WHERE toLower(c.text) CONTAINS toLower(e.tag) OR toLower(c.text) CONTAINS toLower(e.display_name)
+                RETURN e, d.id as doc_id, d.name as doc_name, c.text as chunk_text, c.id as chunk_id
+                """
+                res = self.session.run(graph_query, **params)
+                for record in res:
+                    e_node = record["e"]
+                    
+                    props_str = ", ".join([f"{k}={v}" for k,v in e_node.items() if k not in ["created_at", "updated_at"]])
+                    graph_facts.append(f"Structured Match: [Equipment] {e_node.get('tag')} has properties: {props_str}")
+                    
+                    if record["chunk_text"]:
+                        graph_results.append({
+                            "doc_id": record["doc_id"],
+                            "doc_name": record["doc_name"],
+                            "text": record["chunk_text"],
+                            "chunk_id": record["chunk_id"],
+                            "score": 1.0,
+                            "source": "structured-filter"
+                        })
+            except Exception as e:
+                logger.error("Structured filter execution failed", error=str(e))
 
         # 5. Fusion & Ranking Logic
         # Group segments by document ID to deduplicate and establish priority rankings
@@ -179,13 +212,14 @@ class RAGService:
                 fused_docs[doc_id] = {
                     "doc_id": doc_id,
                     "doc_name": item["doc_name"],
-                    "texts": [item["text"]],
+                    "chunks": [{"chunk_id": item["chunk_id"], "text": item["text"]}],
                     "score": item["score"],
                     "sources": {item["source"]}
                 }
             else:
-                if item["text"] not in fused_docs[doc_id]["texts"]:
-                    fused_docs[doc_id]["texts"].append(item["text"])
+                existing_texts = [c["text"] for c in fused_docs[doc_id]["chunks"]]
+                if item["text"] not in existing_texts:
+                    fused_docs[doc_id]["chunks"].append({"chunk_id": item["chunk_id"], "text": item["text"]})
                 # Apply Max-Score: prioritizing highest retrieval channel score
                 fused_docs[doc_id]["score"] = max(fused_docs[doc_id]["score"], item["score"])
                 fused_docs[doc_id]["sources"].add(item["source"])

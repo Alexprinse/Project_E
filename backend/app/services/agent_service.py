@@ -184,8 +184,8 @@ class AgentService:
         # Step C: Live Google GenAI streaming pipeline
         docs_context = ""
         for d in context.get("documents", []):
-            text_segments = "\n---\n".join(d["texts"])
-            docs_context += f"Document ID: {d['doc_id']}\nTitle: {d['doc_name']}\nContent:\n{text_segments}\n\n"
+            text_segments = "\n---\n".join([f"Chunk ID: CHUNK-{c['chunk_id']}\nContent:\n{c['text']}" for c in d["chunks"]])
+            docs_context += f"Document ID: {d['doc_id']}\nTitle: {d['doc_name']}\n{text_segments}\n\n"
 
         facts_context = "\n".join(context.get("graph_facts", []))
         history_str = "".join([f"{m['role'].capitalize()}: {m['content']}\n" for m in history])
@@ -196,7 +196,7 @@ class AgentService:
             "only the provided document contexts and structural graph facts.\n\n"
             "Instructions:\n"
             "1. Answer the query clearly. Use bullet points and paragraphs where appropriate.\n"
-            "2. Cite the documents you reference using inline brackets, e.g. [DOC-102].\n"
+            "2. Cite the exact chunk you reference using inline brackets, e.g. [CHUNK-02344236-chunk-0]. NEVER cite the document ID (e.g. [DOC-102]), you must cite the specific CHUNK ID.\n"
             "3. At the end of your response, self-assess your confidence level (high, medium, low) "
             "based on how fully the retrieved documents answer the question. You MUST append a "
             "structured JSON metadata block inside <metadata></metadata> tags at the very end of your response.\n\n"
@@ -206,6 +206,7 @@ class AgentService:
             "  \"confidence\": \"high\" | \"medium\" | \"low\",\n"
             "  \"citations\": [\n"
             "    {\n"
+            "      \"chunk_id\": \"CHUNK-02344236-chunk-0\",\n"
             "      \"document_id\": \"DOC-102\",\n"
             "      \"document_name\": \"manual.pdf\",\n"
             "      \"snippet\": \"exact brief sentence cited\"\n"

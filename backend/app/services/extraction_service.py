@@ -10,19 +10,40 @@ logger = get_logger(__name__)
 
 
 def clean_schema(schema: dict) -> dict:
-    """Recursively removes 'additionalProperties' from JSON schema dict."""
+    """Recursively removes 'additionalProperties' and unwraps 'anyOf' with null from JSON schema dict."""
     if not isinstance(schema, dict):
         return schema
     cleaned: dict[str, Any] = {}
     for k, v in schema.items():
         if k == "additionalProperties":
             continue
+        if k == "anyOf" and isinstance(v, list):
+            # Unwrap anyOf if it's just a type + null (Pydantic v2 Optional)
+            non_null_types = [item for item in v if isinstance(item, dict) and item.get("type") != "null"]
+            if len(non_null_types) == 1:
+                return clean_schema(non_null_types[0])
+        if k == "default" and v is None:
+            continue
+            
         if isinstance(v, dict):
-            cleaned[k] = clean_schema(v)
+            cleaned_v = clean_schema(v)
+            # If the result of cleaning v unwrapped an anyOf, we might need to merge it
+            if isinstance(cleaned_v, dict) and "type" in cleaned_v and len(cleaned_v) == 1 and k != "properties":
+                cleaned[k] = cleaned_v
+            else:
+                cleaned[k] = cleaned_v
         elif isinstance(v, list):
             cleaned[k] = [clean_schema(item) if isinstance(item, dict) else item for item in v]
         else:
             cleaned[k] = v
+            # Handle the case where we are processing a property dict directly
+    if "anyOf" in schema and isinstance(schema["anyOf"], list):
+        non_null_types = [item for item in schema["anyOf"] if isinstance(item, dict) and item.get("type") != "null"]
+        if len(non_null_types) == 1:
+            # Merge the unwrapped type into the current dict and remove anyOf
+            for sub_k, sub_v in clean_schema(non_null_types[0]).items():
+                cleaned[sub_k] = sub_v
+            
     return cleaned
 
 
@@ -41,6 +62,28 @@ class ExtractionService:
             logger.warning(
                 "GEMINI_API_KEY is not set. ExtractionService is starting in MOCK mode."
             )
+
+    async def transcribe_audio(self, audio_bytes: bytes, mime_type: str) -> str:
+        """Transcribes audio using Gemini 2.5 Flash."""
+        if self.is_mock:
+            return "This is a mock transcription because the Gemini API key is missing."
+            
+        logger.info("Requesting audio transcription from Gemini API", mime_type=mime_type)
+        try:
+            response = await self.client.aio.models.generate_content(
+                model=settings.GEMINI_LIGHTWEIGHT_MODEL,
+                contents=[
+                    types.Part.from_bytes(data=audio_bytes, mime_type=mime_type),
+                    "Transcribe this audio precisely. Return only the transcription text, nothing else.",
+                ],
+                config=types.GenerateContentConfig(
+                    temperature=0.1,
+                )
+            )
+            return (response.text or "").strip()
+        except Exception as e:
+            logger.error("Audio transcription failed", error=str(e))
+            raise
 
     def chunk_text(self, text: str, chunk_size: int = 20000, overlap: int = 3000) -> List[str]:
         """Splits document text into overlapping segments using a sliding window.
@@ -77,11 +120,13 @@ class ExtractionService:
         self,
         text_content: Optional[str] = None,
         image_bytes: Optional[bytes] = None,
-        mime_type: Optional[str] = "image/png"
+        mime_type: Optional[str] = "image/png",
+        is_tabular: bool = False
     ) -> ExtractionResult:
         """Invokes Gemini 2.5 Pro model to extract schema entities and relationships.
 
-        Supports text-based content and visual multimodal image inputs (scanned P&IDs/forms).
+        Supports text-based content, visual multimodal image inputs (scanned P&IDs/forms),
+        and tabular data structures.
         """
         if self.is_mock:
             logger.info("Generating mock extraction result (MOCK mode)")
@@ -92,7 +137,7 @@ class ExtractionService:
             "the provided technical document (operating manual, datasheet, specifications, or diagram) "
             "and extract structured industrial entities and relationships according to the requested schema.\n\n"
             "Key Entities:\n"
-            "- Equipment: Extract tags (e.g., P-101A, V-302), machine type, area location, criticality, oem.\n"
+            "- Equipment: Extract tags (e.g., P-101A, V-302), machine type, area location, criticality (CRITICAL! You must extract the criticality rating such as High, Medium, or Low if present), install date, oem.\n"
             "- Document: Extract document references, versions, dates, authors.\n"
             "- Person: Extract maintenance roles, engineer names, departments, certifications.\n"
             "- Location: Extract units, plants, zones.\n"
@@ -105,6 +150,16 @@ class ExtractionService:
             "1. Only return relationships where BOTH source and target entities exist in your returned nodes lists.\n"
             "2. Extract Equipment.tag values carefully, matching structural engineering labels (e.g. KV-101)."
         )
+
+        if is_tabular:
+            system_instruction += (
+                "\n\nTabular Data Context:\n"
+                "The provided text is structured tabular data (e.g. from a spreadsheet), represented in a text format (like markdown). "
+                "Use the column headers as strong hints for entity types and properties. For example, a column named 'Equipment Tag' or 'Failure Date' "
+                "should map directly to the corresponding entity property, more confidently than free-text inference. "
+                "You MUST extract values for all schema properties if a corresponding column exists (e.g., if there is a 'Criticality' column, map it exactly to the `criticality` property on the Equipment node). "
+                "Extract each row as a consistent set of related entities and link them appropriately."
+            )
 
         try:
             # Prepare content inputs (multimodal support)
@@ -237,6 +292,69 @@ class ExtractionService:
             raise RuntimeError("Gemini image description failed after maximum retries due to quota exhaustion.")
         except Exception as e:
             logger.error("Failed to describe image using Gemini vision", error=str(e))
+            raise e
+
+    async def read_equipment_tag_from_image(
+        self,
+        image_bytes: bytes,
+        mime_type: str = "image/jpeg"
+    ) -> Optional[str]:
+        """Invokes Gemini vision to extract a single equipment tag from a photo.
+        Returns the exact tag string found, or 'NONE' if no legible tag is present.
+        """
+        if self.is_mock:
+            logger.info("Generating mock equipment tag (MOCK mode)")
+            return "P-101A"
+
+        prompt = (
+            "Analyze this photo. Look for any visible equipment tag or nameplate text (e.g. 'P-101A', 'V-302'). "
+            "Return ONLY the exact tag string found. If you cannot clearly read any equipment tag, return the exact word 'NONE'. "
+            "Do not guess, do not include any other text in your response."
+        )
+
+        try:
+            contents: List[Any] = [
+                types.Part.from_bytes(
+                    data=image_bytes,
+                    mime_type=mime_type
+                ),
+                prompt
+            ]
+            
+            import asyncio
+            for attempt in range(6):
+                try:
+                    # For simple text extraction, the reasoning model might be overkill and slow,
+                    # but we reuse GEMINI_REASONING_MODEL to match the existing pipeline reliability.
+                    response = await self.client.aio.models.generate_content(
+                        model=settings.GEMINI_REASONING_MODEL,
+                        contents=contents,
+                    )
+                    if not response.text:
+                        raise ValueError("Failed to retrieve text from Gemini response")
+                    
+                    tag = response.text.strip().strip("'\"*")
+                    logger.info("Equipment tag image extraction completed", tag=tag)
+                    
+                    if tag.upper() == "NONE":
+                        return None
+                    return tag
+                except Exception as e:
+                    err_msg = str(e).lower()
+                    if "429" in err_msg or "resource_exhausted" in err_msg or "quota" in err_msg:
+                        wait_sec = 6 + attempt * 4
+                        logger.warning(
+                            "Gemini API rate limit/quota reached in tag extraction. Sleeping before retry.",
+                            attempt=attempt,
+                            wait_seconds=wait_sec,
+                            error=str(e)
+                        )
+                        await asyncio.sleep(wait_sec)
+                    else:
+                        raise e
+            raise RuntimeError("Gemini tag extraction failed after maximum retries due to quota exhaustion.")
+        except Exception as e:
+            logger.error("Failed to extract tag using Gemini vision", error=str(e))
             raise e
 
     def _generate_mock_result(self, text: Optional[str]) -> ExtractionResult:

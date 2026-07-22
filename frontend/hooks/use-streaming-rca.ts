@@ -1,12 +1,15 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { env } from "@/lib/env";
 import { api, Citation, FailureNode } from "@/lib/api";
+import { useLoadingMessage } from "./use-loading-message";
 
 export function useStreamingRca() {
   const [failures, setFailures] = useState<FailureNode[]>([]);
   const [loadingFailures, setLoadingFailures] = useState(false);
   const [loadingAnalysis, setLoadingAnalysis] = useState(false);
-  const [status, setStatus] = useState("");
+  const [internalStatus, setInternalStatus] = useState("");
+  const rotatingMessage = useLoadingMessage(loadingAnalysis, "");
+  const status = internalStatus || (loadingAnalysis ? rotatingMessage : "");
   const [rcaReport, setRcaReport] = useState("");
   const [citations, setCitations] = useState<Citation[]>([]);
   const [confidence, setConfidence] = useState<"high" | "medium" | "low" | null>(null);
@@ -52,7 +55,8 @@ export function useStreamingRca() {
     const isStale = () => activeRequestId.current !== requestId;
 
     setLoadingAnalysis(true);
-    setStatus("Initiating analysis...");
+    setLoadingAnalysis(true);
+    setInternalStatus("");
     setRcaReport("");
     setCitations([]);
     setConfidence(null);
@@ -113,7 +117,7 @@ export function useStreamingRca() {
           try {
             const data = JSON.parse(eventData);
             if (eventType === "status") {
-              setStatus(data.message || "Analyzing...");
+              setInternalStatus(data.message || "");
             } else if (eventType === "token") {
               fullReportText += data.token;
               setRcaReport(fullReportText);
@@ -122,10 +126,10 @@ export function useStreamingRca() {
               setCitations(data.citations || []);
               setConfidence(data.confidence || "medium");
               setExecutionTime(data.execution_time_sec !== undefined ? data.execution_time_sec : null);
-              setStatus("");
+              setInternalStatus("");
             } else if (eventType === "error") {
               setError(data.error);
-              setStatus("");
+              setInternalStatus("");
             }
           } catch (err) {
             console.error("Failed to parse event JSON data payload", err);
@@ -140,11 +144,12 @@ export function useStreamingRca() {
       console.error("RCA stream error", e);
       if (!isStale()) {
         setError((e as Error).message || "Plant terminal network error.");
-        setStatus("");
+        setInternalStatus("");
       }
     } finally {
       if (!isStale()) {
         setLoadingAnalysis(false);
+        setInternalStatus("");
       }
     }
   }, []);

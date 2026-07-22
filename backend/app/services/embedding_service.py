@@ -34,7 +34,7 @@ class EmbeddingService:
 
         if self.is_mock:
             logger.info("Generating mock embeddings", count=len(texts), model=settings.VOYAGE_EMBED_MODEL)
-            # Voyage-3 default dimension is 1024
+            # Voyage-4 default dimension is 1024
             return [[0.01] * 1024 for _ in texts]
 
         logger.info(

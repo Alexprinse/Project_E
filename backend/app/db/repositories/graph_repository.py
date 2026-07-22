@@ -317,13 +317,14 @@ class GraphRepository(BaseRepository):
         DETACH DELETE d
         WITH entities
         UNWIND entities as ent
-        // Only purge entities left with NO remaining relationships at all (of any type, to any
-        // node) after this document and its chunks are gone - not just Document/Chunk links -
-        // so entities still referenced by other documents or linked into other graph structure
-        // are preserved instead of being silently destroyed.
-        OPTIONAL MATCH (ent)-[]-(other)
-        WITH ent, count(other) as remaining_connections
-        WHERE remaining_connections = 0
+        // Only purge entities left with NO DIRECT connection to any remaining Document
+        // or Chunk. In our schema, every valid entity must be sourced by (directly linked to)
+        // at least one Document or Chunk. If it loses all such links, it's an orphaned ghost
+        // (even if it still connects to another entity like Equipment) and must be purged.
+        OPTIONAL MATCH (ent)-[]-(source)
+        WHERE source:Document OR source:Chunk
+        WITH ent, count(source) as direct_sources
+        WHERE direct_sources = 0
         DETACH DELETE ent
         """
         self.session.run(query, document_id=document_id)

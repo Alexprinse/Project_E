@@ -87,6 +87,7 @@ class CopilotChatRequest(BaseModel):
 
 
 class Citation(BaseModel):
+    chunk_id: Optional[str] = Field(None, description="Optional ID of specific cited chunk")
     document_id: str = Field(..., description="ID of source document")
     document_name: str = Field(..., description="File name or title of document")
     snippet: str = Field(..., description="Snippet of text cited from source")

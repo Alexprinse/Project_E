@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { BottomSheet } from "@/components/ui/bottom-sheet";
 import { EmptyState } from "@/components/ui/empty-state";
 import { api, GraphResponse, NodeSchema, EdgeSchema } from "@/lib/api";
+import { useLoadingMessage } from "@/hooks/use-loading-message";
 
 const InteractiveGraph = dynamic(
   () => import("@/components/features/graph-explorer/InteractiveGraph"),
@@ -108,6 +109,7 @@ function NodeDetail({
 export default function GraphExplorerPage() {
   const [searchTag, setSearchTag] = useState("P-101");
   const [loading, setLoading] = useState(false);
+  const loadingMessage = useLoadingMessage(loading, "Routing graph channels...");
   const [graphData, setGraphData] = useState<GraphResponse | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
 
@@ -256,7 +258,7 @@ export default function GraphExplorerPage() {
           {loading ? (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 z-10 bg-[#080C0F]">
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
-              <span className="text-xs font-mono text-muted-foreground font-semibold">Routing graph channels...</span>
+              <span className="text-xs font-mono text-muted-foreground font-semibold">{loadingMessage}</span>
             </div>
           ) : searchError && !graphData ? (
             <div className="absolute inset-0 flex items-center justify-center bg-[#080C0F]">

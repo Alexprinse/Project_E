@@ -1,17 +1,23 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { env } from "@/lib/env";
 import { Citation } from "@/lib/api";
+import { useLoadingMessage } from "./use-loading-message";
 
 export interface Message {
   role: "user" | "assistant";
   content: string;
   citations?: Citation[];
+  image_url?: string;
+  is_identification?: boolean;
+  identification_data?: any;
 }
 
 export function useStreamingChat() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
-  const [status, setStatus] = useState<string>("");
+  const [internalStatus, setInternalStatus] = useState<string>("");
+  const rotatingMessage = useLoadingMessage(loading, "");
+  const status = internalStatus || (loading ? rotatingMessage : "");
   const [citations, setCitations] = useState<Citation[]>([]);
   const [confidence, setConfidence] = useState<"high" | "medium" | "low" | null>(null);
   const [conversationId, setConversationId] = useState<string | null>(null);
@@ -39,7 +45,7 @@ export function useStreamingChat() {
     const isStale = () => activeRequestId.current !== requestId;
 
     setLoading(true);
-    setStatus("Connecting to industrial copilot...");
+    setInternalStatus("");
     setCitations([]);
     setConfidence(null);
     setExecutionTime(null);
@@ -111,7 +117,7 @@ export function useStreamingChat() {
           try {
             const data = JSON.parse(eventData);
             if (eventType === "status") {
-              setStatus(data.message || "Thinking...");
+              setInternalStatus(data.message || "");
             } else if (eventType === "token") {
               assistantText += data.token;
               
@@ -130,7 +136,7 @@ export function useStreamingChat() {
               setCitations(data.citations || []);
               setConfidence(data.confidence || "medium");
               setExecutionTime(data.execution_time_sec !== undefined && data.execution_time_sec !== null ? data.execution_time_sec : null);
-              setStatus("");
+              setInternalStatus("");
               
               // Update last assistant message with its actual citations
               setMessages((prev) => {
@@ -142,7 +148,7 @@ export function useStreamingChat() {
                 return prev;
               });
             } else if (eventType === "error") {
-              setStatus(`Error: ${data.error}`);
+              setInternalStatus(`Error: ${data.error}`);
             }
           } catch (err) {
             console.error("Failed to parse event JSON data payload", err, eventData);
@@ -156,7 +162,7 @@ export function useStreamingChat() {
       }
       console.error("Stream reader loop aborted with error", e);
       if (!isStale()) {
-        setStatus("Error: Plant terminal offline.");
+        setInternalStatus("Error: Plant terminal offline.");
       }
     } finally {
       if (!isStale()) {
@@ -173,10 +179,76 @@ export function useStreamingChat() {
     setMessages([]);
     setCitations([]);
     setConfidence(null);
-    setStatus("");
+    setInternalStatus("");
     setConversationId(null);
     setExecutionTime(null);
     setLoading(false);
+  }, []);
+
+  const submitIdentificationImage = useCallback(async (file: File) => {
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    const requestId = ++activeRequestId.current;
+    const isStale = () => activeRequestId.current !== requestId;
+
+    setLoading(true);
+    setInternalStatus("Analyzing image...");
+    setCitations([]);
+    setConfidence(null);
+    setExecutionTime(null);
+
+    const imageUrl = URL.createObjectURL(file);
+    const userMessage: Message = { 
+      role: "user", 
+      content: "Identify equipment in this photo",
+      image_url: imageUrl
+    };
+    setMessages((prev) => [...prev, userMessage]);
+
+    try {
+      const url = `${env.NEXT_PUBLIC_API_URL}/api/v1/copilot/identify-equipment`;
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const t0 = performance.now();
+      const response = await fetch(url, {
+        method: "POST",
+        body: formData,
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        throw new Error(`Server returned ${response.status}`);
+      }
+
+      const data = await response.json();
+      const t1 = performance.now();
+
+      if (isStale()) return;
+
+      setExecutionTime((t1 - t0) / 1000);
+      
+      const assistantMessage: Message = {
+        role: "assistant",
+        content: data.message || "Identification complete",
+        is_identification: true,
+        identification_data: data
+      };
+      setMessages((prev) => [...prev, assistantMessage]);
+      setInternalStatus("");
+    } catch (err: any) {
+      if (err.name === "AbortError") return;
+      if (isStale()) return;
+      
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: `Error: ${err.message || "Failed to identify equipment"}` }
+      ]);
+      setInternalStatus("");
+    } finally {
+      if (!isStale()) setLoading(false);
+    }
   }, []);
 
   return {
@@ -187,6 +259,7 @@ export function useStreamingChat() {
     confidence,
     conversationId,
     sendMessage,
+    submitIdentificationImage,
     clearChat,
     executionTime,
   };

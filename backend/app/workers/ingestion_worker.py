@@ -69,7 +69,7 @@ class IngestionWorker:
                j.file_name as file_name,
                j.status as status,
                j.progress as progress,
-               j.error as error,
+               properties(j).error as error,
                j.created_at as created_at,
                j.updated_at as updated_at
         """
@@ -96,7 +96,7 @@ class IngestionWorker:
                j.file_name as file_name,
                j.status as status,
                j.progress as progress,
-               j.error as error,
+               properties(j).error as error,
                j.created_at as created_at,
                j.updated_at as updated_at
         ORDER BY coalesce(j.updated_at, j.created_at, 0) DESC
@@ -165,11 +165,47 @@ class IngestionWorker:
             
             file_ext = os.path.splitext(file_path)[1].lower()
             is_image = file_ext in [".png", ".jpg", ".jpeg", ".ppm"]
+            is_tabular = file_ext in [".xlsx", ".xls", ".csv"]
             
             parsed_text = ""
             image_bytes = None
+            chunks: List[str] = []
             
-            if is_image:
+            if is_tabular:
+                import pandas as pd
+                logger.info("Parsing tabular spreadsheet data", job_id=job_id)
+                try:
+                    def df_to_markdown(df: Any) -> str:
+                        if df.empty:
+                            return ""
+                        headers = list(df.columns)
+                        header_row = "| " + " | ".join(str(h).replace("|", "\\|") for h in headers) + " |"
+                        separator_row = "| " + " | ".join(["---"] * len(headers)) + " |"
+                        rows = []
+                        for _, row in df.iterrows():
+                            r = "| " + " | ".join(str(x).replace("|", "\\|").replace("\n", " ") for x in row.values) + " |"
+                            rows.append(r)
+                        return "\n".join([header_row, separator_row] + rows)
+
+                    chunk_size = 1
+                    if file_ext == ".csv":
+                        df = pd.read_csv(file_path)
+                        for i in range(0, len(df), chunk_size):
+                            batch = df.iloc[i:i+chunk_size]
+                            md_table = df_to_markdown(batch)
+                            chunks.append(f"Sheet: CSV Data\n\n{md_table}")
+                    else:
+                        xls = pd.ExcelFile(file_path)
+                        for sheet_name in xls.sheet_names:
+                            df = pd.read_excel(xls, sheet_name=sheet_name)
+                            for i in range(0, len(df), chunk_size):
+                                batch = df.iloc[i:i+chunk_size]
+                                md_table = df_to_markdown(batch)
+                                chunks.append(f"Sheet: {sheet_name}\n\n{md_table}")
+                except Exception as ex:
+                    logger.warning("Tabular parsing failed, falling back", error=str(ex))
+                    raise ex
+            elif is_image:
                 if file_ext == ".ppm":
                     try:
                         from PIL import Image
@@ -203,8 +239,10 @@ class IngestionWorker:
             cls.update_job(job_id, progress=30)
             logger.info("Step 2: Partitioning text into semantic window chunks", job_id=job_id)
             
-            chunks: List[str] = []
-            if is_image:
+            if is_tabular:
+                if not chunks:
+                    chunks = ["[Empty tabular data]"]
+            elif is_image:
                 # Image documents are processed by calling Gemini vision to transcribe/describe their content
                 img_mime = "image/jpeg" if file_ext == ".jpg" or file_ext == ".jpeg" else "image/png"
                 if not image_bytes:
@@ -238,7 +276,10 @@ class IngestionWorker:
             else:
                 for idx, chunk in enumerate(chunks):
                     logger.info("Extracting chunk", index=idx, total=len(chunks))
-                    extraction = await extraction_service.extract_structured_data(text_content=chunk)
+                    extraction = await extraction_service.extract_structured_data(
+                        text_content=chunk,
+                        is_tabular=is_tabular
+                    )
                     cls._merge_extraction_blocks(merged_result, extraction)
 
             # Step 4: Generate Embeddings using Voyage AI
@@ -285,8 +326,21 @@ class IngestionWorker:
                             rel_type="HAS_DOCUMENT",
                             properties={}
                         )
+                        
+                        # Explicitly bridge Equipment to Location if present
+                        if eq.location:
+                            # Ensure the Location node exists
+                            graph_repo.merge_node("Location", eq.location, {})
+                            graph_repo.merge_relationship(
+                                source_label="Equipment",
+                                source_id=eq.tag,
+                                target_label="Location",
+                                target_id=eq.location,
+                                rel_type="PART_OF",
+                                properties={}
+                            )
                     except Exception as e:
-                        logger.warning("Failed to link Equipment to raw document", tag=eq.tag, error=str(e))
+                        logger.warning("Failed to link Equipment to raw document or location", tag=eq.tag, error=str(e))
                 for doc in merged_result.documents:
                     graph_repo.merge_node("Document", doc.id, doc.model_dump(exclude={"id"}))
                     try:

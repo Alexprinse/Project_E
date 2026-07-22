@@ -86,3 +86,4 @@ VERIFICATION_REPORT.md
 Thumbs.db
 
 .agents
+backend/migrate_locations.py

@@ -20,6 +20,7 @@ import { BottomSheet } from "@/components/ui/bottom-sheet";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, IngestionStatusResponse, GraphResponse } from "@/lib/api";
+import { useLoadingMessage } from "@/hooks/use-loading-message";
 
 interface IngestionJobCache {
   jobId: string;
@@ -31,7 +32,7 @@ interface IngestionJobCache {
   error?: string;
 }
 
-const ACCEPTED_TYPES = [".pdf", ".csv", ".xlsx", ".txt", ".png", ".jpg", ".jpeg"];
+const ACCEPTED_TYPES = [".pdf", ".csv", ".xlsx", ".xls", ".txt", ".png", ".jpg", ".jpeg"];
 
 function statusVariant(status: string): "success" | "warning" | "danger" | "info" {
   switch (status) {
@@ -46,6 +47,7 @@ export default function IngestionPage() {
   const [files, setFiles] = useState<IngestionJobCache[]>([]);
   const [dragActive, setDragActive] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const loadingMessage = useLoadingMessage(uploading, "Transmitting asset...");
 
   const [selectedJob, setSelectedJob] = useState<IngestionJobCache | null>(null);
   const [drawerLoading, setDrawerLoading] = useState(false);
@@ -324,7 +326,7 @@ export default function IngestionPage() {
           {uploading && (
             <div className="absolute inset-0 rounded-xl bg-background/80 backdrop-blur-sm flex items-center justify-center gap-3">
               <Loader2 className="h-5 w-5 animate-spin text-primary" />
-              <span className="text-sm font-mono text-foreground">Transmitting asset...</span>
+              <span className="text-sm font-mono text-foreground">{loadingMessage}</span>
             </div>
           )}
         </div>

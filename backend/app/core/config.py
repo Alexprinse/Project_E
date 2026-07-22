@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     VOYAGE_API_KEY: str = Field(default="mock-key-for-skeleton")
 
     # Model parameters
-    VOYAGE_EMBED_MODEL: str = "voyage-3"
+    VOYAGE_EMBED_MODEL: str = "voyage-4"
     GEMINI_REASONING_MODEL: str = "gemini-3.1-flash-lite"
     GEMINI_LIGHTWEIGHT_MODEL: str = "gemini-3.1-flash-lite"
 
