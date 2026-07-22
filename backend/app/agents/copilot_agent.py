@@ -145,10 +145,7 @@ async def generate_answer_node(state: CopilotAgentState) -> Dict[str, Any]:
     User Query: {state['query']}
     """
 
-    is_mock = (
-        not settings.GEMINI_API_KEY 
-        or settings.GEMINI_API_KEY == "mock-key-for-skeleton"
-    )
+    is_mock = settings.is_gemini_mock
     
     if is_mock:
         # Generate dummy text matching formatting rules for offline verification

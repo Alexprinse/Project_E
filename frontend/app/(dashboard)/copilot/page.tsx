@@ -725,7 +725,7 @@ export default function CopilotPage() {
 
           {/* Standard Messages */}
           {!compareMode && hasMessages && (
-            <div className="space-y-4 md:space-y-5 max-w-3xl">
+            <div className="space-y-4 md:space-y-5 max-w-3xl mx-auto w-full">
               {messages.map((msg, index) => {
                 const isUser = msg.role === "user";
                 const isLast = index === messages.length - 1;
@@ -842,7 +842,7 @@ export default function CopilotPage() {
 
         {/* ── Input Composer ── */}
         <div className="shrink-0 border-t border-border bg-card/60 backdrop-blur-sm p-3 pb-[calc(12px+56px+env(safe-area-inset-bottom,0px))] md:p-4">
-          <form onSubmit={handleSubmit} className="flex gap-2.5 max-w-3xl items-end">
+          <form onSubmit={handleSubmit} className="flex gap-2.5 max-w-3xl mx-auto items-end">
             <div className="flex-1 flex flex-col">
               {previewUrl && (
                 <div className="mb-2 relative self-start">
@@ -977,7 +977,7 @@ export default function CopilotPage() {
             </div>
           )}
           {executionTime !== null && !compareMode && !errorMsg && (
-            <p className="text-[10px] font-mono text-muted-foreground mt-2 pl-1">
+            <p className="text-[10px] font-mono text-muted-foreground mt-2 max-w-3xl mx-auto text-center">
               Last response: {executionTime.toFixed(2)}s — hybrid graph + vector retrieval
             </p>
           )}

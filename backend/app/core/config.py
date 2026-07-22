@@ -38,6 +38,22 @@ class Settings(BaseSettings):
     def is_dev(self) -> bool:
         return self.ENVIRONMENT == "development"
 
+    @property
+    def is_gemini_mock(self) -> bool:
+        return (
+            not self.GEMINI_API_KEY
+            or self.GEMINI_API_KEY == "mock-key-for-skeleton"
+            or self.GEMINI_API_KEY.startswith("your-")
+        )
+
+    @property
+    def is_voyage_mock(self) -> bool:
+        return (
+            not self.VOYAGE_API_KEY
+            or self.VOYAGE_API_KEY == "mock-key-for-skeleton"
+            or self.VOYAGE_API_KEY.startswith("your-")
+        )
+
 
 # Instantiate settings singleton
 settings = Settings()

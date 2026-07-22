@@ -37,10 +37,7 @@ class RAGService:
             return {"type": "entity-specific", "entities": list(set(tags))}
 
         # Fallback pass: Call lightweight Gemini Flash model
-        is_mock = (
-            not settings.GEMINI_API_KEY 
-            or settings.GEMINI_API_KEY == "mock-key-for-skeleton"
-        )
+        is_mock = settings.is_gemini_mock
         if is_mock:
             return {"type": "general", "entities": []}
 

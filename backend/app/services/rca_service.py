@@ -93,10 +93,7 @@ class RCAService:
             return
 
         # Step B: Check for mock mode
-        is_mock = (
-            not settings.GEMINI_API_KEY 
-            or settings.GEMINI_API_KEY == "mock-key-for-skeleton"
-        )
+        is_mock = settings.is_gemini_mock
 
         if is_mock:
             yield ServerSentEvent(event="status", data=json.dumps({"message": "Generating structured RCA report..."}))

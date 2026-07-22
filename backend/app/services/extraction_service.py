@@ -52,10 +52,7 @@ class ExtractionService:
 
     def __init__(self):
         # Fallback to mock mode if no api key or mock placeholder is present
-        self.is_mock = (
-            not settings.GEMINI_API_KEY 
-            or settings.GEMINI_API_KEY == "mock-key-for-skeleton"
-        )
+        self.is_mock = settings.is_gemini_mock
         if not self.is_mock:
             self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
         else:

@@ -12,10 +12,7 @@ class EmbeddingService:
 
     def __init__(self):
         # Allow running in mock mode for local dev/testing if VOYAGE_API_KEY is not set
-        self.is_mock = (
-            not settings.VOYAGE_API_KEY 
-            or settings.VOYAGE_API_KEY == "mock-key-for-skeleton"
-        )
+        self.is_mock = settings.is_voyage_mock
         if not self.is_mock:
             self.client = AsyncClient(api_key=settings.VOYAGE_API_KEY)
         else:

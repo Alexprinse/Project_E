@@ -130,10 +130,7 @@ class AgentService:
             context = await rag_service.retrieve_hybrid_context(query)
 
         # Step B: Check for mock mode to simulate streaming output
-        is_mock = (
-            not settings.GEMINI_API_KEY 
-            or settings.GEMINI_API_KEY == "mock-key-for-skeleton"
-        )
+        is_mock = settings.is_gemini_mock
         
         if is_mock:
             # Emit intermediate retrieved items

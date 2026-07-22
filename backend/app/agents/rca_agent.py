@@ -225,10 +225,7 @@ async def generate_rca_node(state: RCAAgentState) -> Dict[str, Any]:
     Based on the facts above, generate the structured RCA report.
     """
 
-    is_mock = (
-        not settings.GEMINI_API_KEY 
-        or settings.GEMINI_API_KEY == "mock-key-for-skeleton"
-    )
+    is_mock = settings.is_gemini_mock
 
     if is_mock:
         dummy_answer = (
