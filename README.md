@@ -2,6 +2,8 @@
 
 An industrial knowledge terminal that transforms unstructured engineering documents into a navigable, queryable graph.
 
+🎬 **[Watch Demo Video on YouTube](https://youtu.be/WlEtyPd_5gs)**
+
 ## Problem Statement
 
 Industrial maintenance and operations teams struggle with fragmented documentation scattered across PDF manuals, tabular spreadsheets, and visual P&ID schematics. When critical failures occur, technicians waste hours cross-referencing these silos to diagnose root causes or locate affected equipment. Traditional keyword search engines fail because they cannot connect relationships across disparate document types or parse structured connections hidden in complex schematics and tables.
@@ -84,9 +86,14 @@ flowchart TD
 
 ### Prerequisites
 
-- Node.js (v20+)
-- Python 3.11+ with `uv` installed
-- Docker (for local Neo4j instance)
+- **Node.js**: v20+
+- **Python**: 3.11+
+- **`uv`** (Python package installer & environment manager):
+  ```bash
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  ```
+- **Docker**: For running local Neo4j instance
+- **`make`**: Build automation tool
 
 ### 1. Environment Setup
 
@@ -193,4 +200,7 @@ The system has been built and tested on real-world industrial data:
 
 ## Team / Credits
 
-- Hakuna Matat
+### Team: Hakuna Matata
+
+- **Shalem Bakth Singh Badampudi**
+- **Venkata Manvitha Tatikonda**
