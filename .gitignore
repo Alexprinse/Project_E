@@ -51,8 +51,7 @@ yarn-error.log*
 **/uploads/
 **/data/
 
-# Sample / test data (large binaries, not source)
-backend/sample-data/
+# Sample / test data (scratch directory ignored)
 scratch/
 
 # Generated / temporary build artifacts

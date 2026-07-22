@@ -1,0 +1,25 @@
+STANDARD OPERATING PROCEDURE: SOP-001
+Title: C-101 Column and P-101A Bottoms Pump Startup
+Location: Refinery Unit 3
+Effective Date: 2026-07-20
+
+1. PURPOSE
+This procedure outlines the safe startup sequence for the C-101 distillation column and its associated bottoms pump, P-101A.
+
+2. PRE-STARTUP CHECKS
+- Verify all maintenance work is complete and blinds are removed.
+- Ensure the C-101 column base liquid level is established at >30%.
+- Confirm suction and discharge valves for P-101A are in the correct open/closed positions.
+
+3. STARTUP PROCEDURE
+3.1. Field Operator: Crack open the P-101A suction valve to prime the pump and clear any vapor locks.
+3.2. Board Operator: Verify the DCS motor run indication for P-101A is ready.
+3.3. Board Operator: Start P-101A from the DCS.
+3.4. Field Operator: Slowly open the discharge valve to establish flow.
+3.5. Board Operator: Monitor the discharge pressure.
+   - **Target:** The normal discharge pressure target for P-101A is 450 psi.
+   - **Safety Limit:** Do not exceed the safety interlock threshold of 500 psi. If pressure approaches this limit, the interlock will automatically trip the pump to prevent mechanical failure.
+
+4. POST-STARTUP
+- Verify steady-state operation and check for any abnormal vibrations or seal leaks.
+- Log the successful startup and any pressure deviations in the shift handover report.

@@ -113,7 +113,19 @@ GEMINI_API_KEY="your-gemini-api-key-here"
 VOYAGE_API_KEY="your-voyage-api-key-here"
 ```
 
-### 2. Installation
+> [!TIP]
+> **Mock Mode Fallback**: If `VOYAGE_API_KEY` is not provided (or set to `"mock-key-for-skeleton"`), the system automatically runs in **Mock Mode**. Vector embedding calls will return instant dummy vectors (`1024-dim`) to allow fast offline UI testing without triggering Voyage AI free-tier rate limits (`3 RPM / 10K TPM`). Similarly, omitting `GEMINI_API_KEY` triggers mock extraction responses.
+
+### 2. Sample Data
+
+Ready-to-use industrial test data is included in [`backend/sample-data/`](file:///Users/shalem/Documents/Project_E/backend/sample-data):
+- **`chevron_final_investigation_report.pdf`** – CSB Incident Investigation Report
+- **`dow_investigation_report.pdf`** – CSB Chemical Incident Report
+- **`equipment-inventory.xlsx`** – Structured equipment spreadsheet
+- **`synthetic-pid-c101.png`** – P&ID engineering schematic image
+- **`SOP-001.txt`** – Standard Operating Procedure text document
+
+### 3. Installation
 
 Install dependencies for both frontend and backend from the root directory:
 
