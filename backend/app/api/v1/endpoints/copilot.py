@@ -76,60 +76,98 @@ async def identify_equipment(
     file: UploadFile = File(...),
     session: Session = Depends(get_neo4j_session)
 ):
-    """Reads equipment tag from an uploaded photo and returns its local graph neighborhood."""
+    """Reads equipment tags from an uploaded photo and returns matching graph neighborhoods."""
     try:
         content = await file.read()
         extraction_service = ExtractionService()
         
-        # 1. Read the tag from the image using Gemini Vision
+        # 1. Read tags from the image using Gemini Vision
         mime_type = file.content_type or "image/jpeg"
-        tag = await extraction_service.read_equipment_tag_from_image(content, mime_type)
+        extracted_tags = await extraction_service.read_equipment_tags_from_image(content, mime_type)
         
-        if not tag:
+        if not extracted_tags:
             return {
+                "identified_tags": [],
                 "identified_tag": None,
                 "matched": False,
-                "message": "Couldn't identify a legible equipment tag in this photo — try getting closer to the nameplate or ensure it's not obscured."
+                "matches": [],
+                "unmatched_tags": [],
+                "message": "Couldn't identify any legible equipment tags in this photo — try getting closer to the nameplate or ensure it's not obscured."
             }
 
-        # 2. Fuzzy match against the Neo4j Graph
-        lower_term = tag.lower().strip()
+        graph_repo = GraphRepository(session)
+        matches = []
+        unmatched_tags = []
+        matched_node_ids = set()
+
         search_query = """
         MATCH (n:Equipment)
-        WHERE (n.tag IS NOT NULL AND toLower(n.tag) CONTAINS $lower_term) OR
+        WHERE (n.tag IS NOT NULL AND toLower(n.tag) = $lower_term) OR
+              (n.display_name IS NOT NULL AND toLower(n.display_name) = $lower_term) OR
+              (n.id IS NOT NULL AND toLower(n.id) = $lower_term) OR
+              (n.tag IS NOT NULL AND toLower(n.tag) CONTAINS $lower_term) OR
               (n.display_name IS NOT NULL AND toLower(n.display_name) CONTAINS $lower_term) OR
               (n.id IS NOT NULL AND toLower(n.id) CONTAINS $lower_term)
-        RETURN n.id AS node_id
-        LIMIT 1
+        RETURN coalesce(n.id, n.tag, n.display_name, elementId(n)) AS node_id, n.tag AS tag, n.display_name AS display_name
+        LIMIT 5
         """
-        result = session.run(search_query, lower_term=lower_term).single()
-        
-        if not result:
-            return {
-                "identified_tag": tag,
-                "matched": False,
-                "message": f"Identified tag as '{tag}', but no matching equipment was found in the knowledge graph."
-            }
+
+        # 2. Match each extracted tag individually
+        for tag_str in extracted_tags:
+            lower_term = tag_str.lower().strip()
+            results = session.run(search_query, lower_term=lower_term).data()
             
-        matched_node_id = result["node_id"]
-        
-        # 3. Get the subgraph around the matched equipment
-        graph_repo = GraphRepository(session)
-        subgraph = graph_repo.get_subgraph(matched_node_id, max_depth=1)
-        
-        # Clean up chunk nodes to keep the response light, similar to frontend filter
-        filtered_nodes = [n for n in subgraph["nodes"] if "Chunk" not in n["labels"]]
-        filtered_ids = {n["id"] for n in filtered_nodes}
-        filtered_edges = [e for e in subgraph["edges"] if e["source"] in filtered_ids and e["target"] in filtered_ids]
-        
-        subgraph["nodes"] = filtered_nodes
-        subgraph["edges"] = filtered_edges
-        
+            if not results:
+                unmatched_tags.append(tag_str)
+                continue
+
+            tag_matched_nodes = False
+            for record in results:
+                node_id = record["node_id"]
+                if node_id in matched_node_ids:
+                    tag_matched_nodes = True
+                    continue
+                
+                matched_node_ids.add(node_id)
+                tag_matched_nodes = True
+
+                # Fetch subgraph around matched equipment
+                subgraph = graph_repo.get_subgraph(node_id, max_depth=1)
+                filtered_nodes = [n for n in subgraph.get("nodes", []) if "Chunk" not in n.get("labels", [])]
+                filtered_ids = {n["id"] for n in filtered_nodes}
+                filtered_edges = [e for e in subgraph.get("edges", []) if e.get("source") in filtered_ids and e.get("target") in filtered_ids]
+
+                subgraph["nodes"] = filtered_nodes
+                subgraph["edges"] = filtered_edges
+
+                matches.append({
+                    "tag": tag_str,
+                    "matched_node_id": node_id,
+                    "subgraph": subgraph
+                })
+            
+            if not tag_matched_nodes and tag_str not in unmatched_tags:
+                unmatched_tags.append(tag_str)
+
+        is_matched = len(matches) > 0
+        joined_tags = ", ".join(extracted_tags)
+
+        if not is_matched:
+            message = f"Identified {len(extracted_tags)} tag(s) ({joined_tags}), but no matching equipment was found in the knowledge graph."
+        elif unmatched_tags:
+            message = f"Found {len(matches)} matching equipment item(s) in graph ({len(unmatched_tags)} tag(s) not in graph: {', '.join(unmatched_tags)})."
+        else:
+            message = f"Successfully matched all {len(matches)} identified equipment item(s) in the knowledge graph."
+
         return {
-            "identified_tag": tag,
-            "matched": True,
-            "matched_node_id": matched_node_id,
-            "subgraph": subgraph
+            "identified_tags": extracted_tags,
+            "identified_tag": matches[0]["tag"] if matches else joined_tags,
+            "matched": is_matched,
+            "matched_node_id": matches[0]["matched_node_id"] if matches else None,
+            "subgraph": matches[0]["subgraph"] if matches else None,
+            "matches": matches,
+            "unmatched_tags": unmatched_tags,
+            "message": message
         }
     except Exception as e:
         logger.error("Error identifying equipment", error=str(e))

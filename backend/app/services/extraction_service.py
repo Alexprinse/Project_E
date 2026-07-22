@@ -70,12 +70,13 @@ class ExtractionService:
             
         logger.info("Requesting audio transcription from Gemini API", mime_type=mime_type)
         try:
+            contents: List[Any] = [
+                types.Part.from_bytes(data=audio_bytes, mime_type=mime_type),
+                "Transcribe this audio precisely. Return only the transcription text, nothing else.",
+            ]
             response = await self.client.aio.models.generate_content(
                 model=settings.GEMINI_LIGHTWEIGHT_MODEL,
-                contents=[
-                    types.Part.from_bytes(data=audio_bytes, mime_type=mime_type),
-                    "Transcribe this audio precisely. Return only the transcription text, nothing else.",
-                ],
+                contents=contents,
                 config=types.GenerateContentConfig(
                     temperature=0.1,
                 )
@@ -287,29 +288,30 @@ class ExtractionService:
                             error=str(e)
                         )
                         await asyncio.sleep(wait_sec)
-                    else:
-                        raise e
             raise RuntimeError("Gemini image description failed after maximum retries due to quota exhaustion.")
         except Exception as e:
             logger.error("Failed to describe image using Gemini vision", error=str(e))
             raise e
 
-    async def read_equipment_tag_from_image(
+    async def read_equipment_tags_from_image(
         self,
         image_bytes: bytes,
         mime_type: str = "image/jpeg"
-    ) -> Optional[str]:
-        """Invokes Gemini vision to extract a single equipment tag from a photo.
-        Returns the exact tag string found, or 'NONE' if no legible tag is present.
+    ) -> List[str]:
+        """Invokes Gemini vision to extract equipment tags from a photo.
+        Returns a list of individual tag strings found (e.g. ['C-101', 'P-101A', 'V-102']),
+        or an empty list if no legible tags are present.
         """
         if self.is_mock:
-            logger.info("Generating mock equipment tag (MOCK mode)")
-            return "P-101A"
+            logger.info("Generating mock equipment tags (MOCK mode)")
+            return ["P-101A", "C-101"]
 
         prompt = (
-            "Analyze this photo. Look for any visible equipment tag or nameplate text (e.g. 'P-101A', 'V-302'). "
-            "Return ONLY the exact tag string found. If you cannot clearly read any equipment tag, return the exact word 'NONE'. "
-            "Do not guess, do not include any other text in your response."
+            "Analyze this photo or schematic image. Look for any visible equipment tags, item tags, or nameplate text "
+            "(e.g. 'C-101', 'P-101A', 'PI-101', 'V-102', 'PSV-101A'). "
+            "Return a JSON array of strings containing all unique equipment tags found, e.g. [\"C-101\", \"P-101A\"]. "
+            "If you cannot clearly read any equipment tag, return [\"NONE\"]. "
+            "Do not include markdown code block formatting or any extra text outside the JSON array."
         )
 
         try:
@@ -322,10 +324,11 @@ class ExtractionService:
             ]
             
             import asyncio
+            import json
+            import re
+
             for attempt in range(6):
                 try:
-                    # For simple text extraction, the reasoning model might be overkill and slow,
-                    # but we reuse GEMINI_REASONING_MODEL to match the existing pipeline reliability.
                     response = await self.client.aio.models.generate_content(
                         model=settings.GEMINI_REASONING_MODEL,
                         contents=contents,
@@ -333,12 +336,32 @@ class ExtractionService:
                     if not response.text:
                         raise ValueError("Failed to retrieve text from Gemini response")
                     
-                    tag = response.text.strip().strip("'\"*")
-                    logger.info("Equipment tag image extraction completed", tag=tag)
-                    
-                    if tag.upper() == "NONE":
-                        return None
-                    return tag
+                    raw_text = response.text.strip()
+                    logger.info("Equipment tags image extraction raw response", raw_text=raw_text)
+
+                    json_match = re.search(r'\[.*\]', raw_text, re.DOTALL)
+                    tags: List[str] = []
+                    if json_match:
+                        try:
+                            parsed = json.loads(json_match.group(0))
+                            if isinstance(parsed, list):
+                                tags = [str(t).strip().strip("'\"*") for t in parsed if str(t).strip()]
+                        except Exception:
+                            pass
+
+                    if not tags:
+                        cleaned = raw_text.replace("[", "").replace("]", "").replace('"', '').replace("'", "")
+                        items = re.split(r'[\s,\n]+', cleaned)
+                        tags = [item.strip() for item in items if item.strip()]
+
+                    final_tags = []
+                    for t in tags:
+                        t_clean = t.strip().strip("'\"*")
+                        if t_clean and t_clean.upper() != "NONE" and t_clean not in final_tags:
+                            final_tags.append(t_clean)
+
+                    logger.info("Equipment tags parsed successfully", tags=final_tags)
+                    return final_tags
                 except Exception as e:
                     err_msg = str(e).lower()
                     if "429" in err_msg or "resource_exhausted" in err_msg or "quota" in err_msg:
@@ -354,8 +377,16 @@ class ExtractionService:
                         raise e
             raise RuntimeError("Gemini tag extraction failed after maximum retries due to quota exhaustion.")
         except Exception as e:
-            logger.error("Failed to extract tag using Gemini vision", error=str(e))
+            logger.error("Failed to read equipment tags from image", error=str(e))
             raise e
+
+    async def read_equipment_tag_from_image(
+        self,
+        image_bytes: bytes,
+        mime_type: str = "image/jpeg"
+    ) -> Optional[str]:
+        tags = await self.read_equipment_tags_from_image(image_bytes, mime_type)
+        return tags[0] if tags else None
 
     def _generate_mock_result(self, text: Optional[str]) -> ExtractionResult:
         """Generates realistic mock extraction entities to facilitate tests when running offline."""
