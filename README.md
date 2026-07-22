@@ -23,6 +23,8 @@ Industrial maintenance and operations teams struggle with fragmented documentati
 
 ## Architecture
 
+### High-Level Data Flow
+
 ```mermaid
 graph LR
     A[Document Sources <br/> PDF, P&ID, Excel] --> B[Ingestion Pipeline <br/> Text / Vision / Tabular]
@@ -30,6 +32,42 @@ graph LR
     C --> D[(Knowledge Graph <br/> Neo4j & Vector Store)]
     D --> E[Hybrid RAG & Agent Layer <br/> Structured Filter Routing]
     E --> F[Frontend UI <br/> Copilot, RCA, Explorer]
+```
+
+### Detailed Component Architecture
+
+```mermaid
+flowchart TD
+    subgraph Ingestion ["1. Ingestion"]
+        PDF[PDF / Text Documents] --> Unstructured[unstructured.partition]
+        PNID["P&ID / Schematic Images (PNG/JPG/PPM)"] --> Vision["Gemini Vision\n(image -> engineering description)"]
+        Unstructured --> Chunker[Sliding-window Chunker]
+        Vision --> Chunker
+    end
+
+    subgraph Extraction ["2. Entity Extraction"]
+        Chunker --> Gemini["Gemini structured extraction\n(Equipment, Person, Location,\nFailure, Regulation, ...)"]
+    end
+
+    subgraph Storage ["3. Neo4j: Graph + Vector Store"]
+        Gemini -->|nodes + relationships| Graph[(Knowledge Graph)]
+        Chunker -->|chunk text| Voyage[Voyage AI voyage-3]
+        Voyage -->|1024-dim embeddings| VectorIndex[(Native Vector Index)]
+    end
+
+    subgraph Agents ["4. Hybrid RAG / Agent Layer (LangGraph)"]
+        Query[User Query] --> Classify[Query Classifier]
+        Classify --> Retrieve[Hybrid Retriever]
+        Graph --> Retrieve
+        VectorIndex --> Retrieve
+        Retrieve --> Reason["Gemini Reasoning\n(cited, confidence-scored)"]
+    end
+
+    subgraph Frontend ["5. Frontend (Next.js)"]
+        Reason --> Copilot[Copilot Chat]
+        Graph --> RCA[RCA Assistant]
+        Graph --> Explorer[Graph Explorer]
+    end
 ```
 
 ## Tech Stack
